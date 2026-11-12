@@ -1,0 +1,8 @@
+{
+  "name": "AJ Notes",
+  "short_name": "Notes",
+  "start_url": "/",
+  "display": "standalone",
+  "background_color": "#faf8f3",
+  "theme_color": "#52654a"
+}

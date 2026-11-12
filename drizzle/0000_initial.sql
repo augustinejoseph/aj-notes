@@ -1,0 +1,14 @@
+CREATE TABLE users (id text PRIMARY KEY, email text NOT NULL);
+CREATE TABLE folders (id uuid PRIMARY KEY, owner text NOT NULL REFERENCES users(id), revision integer NOT NULL, deleted boolean NOT NULL DEFAULT false, data jsonb NOT NULL);
+CREATE TABLE notes (LIKE folders INCLUDING ALL);
+ALTER TABLE notes ADD FOREIGN KEY (owner) REFERENCES users(id);
+CREATE TABLE summaries (LIKE folders INCLUDING ALL);
+ALTER TABLE summaries ADD FOREIGN KEY (owner) REFERENCES users(id);
+CREATE TABLE settings (LIKE folders INCLUDING ALL);
+ALTER TABLE settings ADD FOREIGN KEY (owner) REFERENCES users(id);
+CREATE TABLE images (id uuid PRIMARY KEY, owner text NOT NULL REFERENCES users(id), mime text NOT NULL, bytes bytea NOT NULL);
+CREATE TABLE changes (seq bigserial PRIMARY KEY, owner text NOT NULL REFERENCES users(id), payload jsonb NOT NULL);
+CREATE INDEX changes_owner_seq ON changes(owner,seq);
+CREATE TABLE receipts (id uuid PRIMARY KEY, owner text NOT NULL REFERENCES users(id), result jsonb NOT NULL);
+CREATE TABLE generations (id uuid PRIMARY KEY, owner text NOT NULL REFERENCES users(id), note_id uuid NOT NULL, status text NOT NULL, result jsonb, started_at timestamptz NOT NULL DEFAULT now());
+CREATE UNIQUE INDEX one_generation_per_note ON generations(owner,note_id) WHERE status='running';

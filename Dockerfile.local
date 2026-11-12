@@ -1,0 +1,8 @@
+FROM node:24-bookworm-slim
+WORKDIR /app
+COPY package*.json ./
+COPY vendor ./vendor
+RUN npm ci && npm cache clean --force
+COPY . .
+EXPOSE 3003
+CMD ["npm","run","dev","--","--hostname","0.0.0.0"]

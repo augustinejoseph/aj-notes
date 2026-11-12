@@ -1,0 +1,13 @@
+node_modules/
+.next/
+.git/
+.local/
+.env*
+coverage/
+vendor/
+package-lock.json
+next-env.d.ts
+public/offline-assets.json
+*.tsbuildinfo
+# Applied SQL migrations are immutable and checksum-verified.
+drizzle/

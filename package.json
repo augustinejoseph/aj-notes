@@ -1,0 +1,51 @@
+{
+  "name": "aj-notes",
+  "version": "0.1.0",
+  "private": true,
+  "scripts": {
+    "dev": "next dev --port 3003",
+    "build": "next build --webpack && node scripts/offline-assets.mjs",
+    "start": "next start --port 3003",
+    "typecheck": "tsc --noEmit",
+    "test": "vitest run",
+    "db:migrate": "node --import ./scripts/load-config.mjs scripts/migrate.mjs",
+    "format": "prettier --write . --ignore-unknown",
+    "format:check": "prettier --check . --ignore-unknown"
+  },
+  "dependencies": {
+    "@ajoseph/app-launcher": "file:vendor/ajoseph-app-launcher-0.1.5.tgz",
+    "@blocknote/core": "^0.47.0",
+    "@blocknote/mantine": "^0.47.0",
+    "@blocknote/react": "^0.47.0",
+    "@mantine/core": "^8.3.0",
+    "@mantine/hooks": "^8.3.0",
+    "drizzle-orm": "^0.45.0",
+    "idb": "^8.0.3",
+    "mermaid": "^11.12.0",
+    "next": "^16.0.0",
+    "next-auth": "5.0.0-beta.32",
+    "postgres": "^3.4.9",
+    "react": "^19.2.0",
+    "react-dom": "^19.2.0",
+    "zod": "^4.1.12"
+  },
+  "devDependencies": {
+    "@types/node": "^22.0.0",
+    "@types/react": "^19.0.0",
+    "@types/react-dom": "^19.0.0",
+    "prettier": "^3.10.1",
+    "typescript": "^5.9.3",
+    "vitest": "^4.1.0"
+  },
+  "engines": {
+    "node": ">=22.12.0"
+  },
+  "overrides": {
+    "@blocknote/core": {
+      "uuid": "^11.1.1"
+    },
+    "mermaid": {
+      "katex": "^0.18.2"
+    }
+  }
+}

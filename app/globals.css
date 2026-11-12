@@ -666,3 +666,106 @@ select:hover {
     padding-right: 36px;
   }
 }
+
+.shell {
+  grid-template-rows: auto 1fr;
+}
+.workspace-header {
+  grid-column: 1 / -1;
+  display: flex;
+  align-items: center;
+  justify-content: flex-end;
+  gap: 16px;
+  padding: 12px 24px;
+  border-bottom: 1px solid var(--line);
+  background: var(--paper);
+  position: relative;
+  z-index: 20;
+}
+.header-brand {
+  margin-right: auto;
+  font:
+    30px/1 Georgia,
+    serif;
+  text-decoration: none;
+}
+.workspace-tools {
+  flex-wrap: nowrap;
+  gap: 4px;
+}
+.workspace-tools > button {
+  display: grid;
+  place-items: center;
+  flex: none;
+  width: 44px;
+  height: 44px;
+}
+.workspace-tools .aj-spaces-panel {
+  max-height: calc(100dvh - 92px);
+  overflow-y: auto;
+}
+.sidebar,
+.note-list {
+  height: calc(100dvh - 69px);
+  max-height: calc(100dvh - 69px);
+}
+.settings-page {
+  max-width: 680px;
+  padding: 24px 32px;
+  margin: auto;
+}
+.settings-page label {
+  display: block;
+  margin: 20px 0 8px;
+}
+.settings-page input,
+.settings-page textarea {
+  display: block;
+  width: 100%;
+  margin-bottom: 20px;
+}
+.dialog-actions {
+  display: flex;
+  justify-content: flex-end;
+  gap: 8px;
+  margin-top: 24px;
+}
+.confirm-dialog {
+  max-width: 440px;
+}
+.destructive {
+  background: #9a453b;
+  color: white;
+}
+.destructive:hover {
+  background: #823a31;
+}
+@media (max-width: 800px) {
+  .sidebar {
+    grid-row: 2 / 4;
+    height: auto;
+    max-height: none;
+    min-height: calc(100dvh - 69px);
+  }
+  .note-list {
+    height: auto;
+    max-height: 250px;
+  }
+}
+@media (max-width: 520px) {
+  .workspace-header {
+    padding: 10px 16px;
+    gap: 8px;
+  }
+  .sidebar {
+    min-height: 0;
+    height: auto;
+    max-height: none;
+  }
+  .note-list {
+    max-height: 200px;
+  }
+  .settings-page {
+    padding: 16px 20px 40px;
+  }
+}

@@ -142,6 +142,23 @@ const origin = process.env.NOTES_PREVIEW_URL || "http://localhost:3003";
         json: { error: "Test fixture unavailable" },
       });
     });
+    await context.route("**/apps.json", (route) =>
+      route.fulfill({
+        json: {
+          schemaVersion: 1,
+          apps: ["health", "journal", "notes"].map((id) => ({
+            id,
+            name: id[0].toUpperCase() + id.slice(1),
+            description: "Browser fixture",
+            repository: `aj-${id}`,
+            status: "available",
+            enabled: true,
+            icon: id === "health" ? "heart-pulse" : "book-open",
+            url: `https://${id}.example.test/`,
+          })),
+        },
+      }),
+    );
     const page = await context.newPage(),
       errors = [];
     page.on("pageerror", (e) => {
@@ -169,6 +186,8 @@ const origin = process.env.NOTES_PREVIEW_URL || "http://localhost:3003";
     await page
       .getByRole("button", { name: "＋ New note", exact: true })
       .click();
+    await page.waitForURL(/\/notes\/[a-f0-9-]+$/);
+    const notePath = new URL(page.url()).pathname;
     await page
       .getByRole("textbox", { name: "Note title", exact: true })
       .fill("Browser acceptance note");
@@ -383,13 +402,25 @@ const origin = process.env.NOTES_PREVIEW_URL || "http://localhost:3003";
       "Newest edit during sync",
     );
     await page.getByRole("button", { name: "Settings", exact: true }).click();
-    await page.getByRole("dialog").waitFor();
+    assert.equal(new URL(page.url()).pathname, "/settings");
+    await page
+      .getByRole("heading", { name: "Settings", exact: true })
+      .waitFor();
+    await page.reload();
+    await page
+      .getByRole("heading", { name: "Settings", exact: true })
+      .waitFor();
     await page
       .getByLabel("Summary instructions", { exact: true })
       .fill("My summary preferences");
     await page
       .getByRole("button", { name: "Save settings", exact: true })
       .click();
+    await page
+      .getByRole("button", { name: "Newest edit during sync", exact: false })
+      .first()
+      .click();
+    assert.equal(new URL(page.url()).pathname, notePath);
     await page.getByRole("button", { name: "Sync", exact: true }).click();
     await page
       .getByRole("status")
@@ -437,6 +468,79 @@ const origin = process.env.NOTES_PREVIEW_URL || "http://localhost:3003";
       "Diagram must visibly render",
     );
 
+    console.log("Checking routes, browser history, and Apps popup bounds");
+    await page.getByRole("button", { name: "Settings", exact: true }).click();
+    await page.goBack();
+    await page
+      .getByRole("textbox", { name: "Note title", exact: true })
+      .waitFor();
+    await page.goForward();
+    await page
+      .getByRole("heading", { name: "Settings", exact: true })
+      .waitFor();
+    await context.setOffline(true);
+    await page.reload();
+    await page
+      .getByRole("heading", { name: "Settings", exact: true })
+      .waitFor();
+    assert.equal(
+      await page
+        .getByLabel("Summary instructions", { exact: true })
+        .inputValue(),
+      "My summary preferences",
+    );
+    await page
+      .getByRole("button", { name: "Close settings", exact: true })
+      .click();
+    await page
+      .getByRole("button", { name: "Newest edit during sync", exact: false })
+      .first()
+      .click();
+    await page.reload();
+    await page
+      .getByRole("textbox", { name: "Note title", exact: true })
+      .waitFor();
+    assert.equal(new URL(page.url()).pathname, notePath);
+    await context.setOffline(false);
+    for (const [width, height] of [
+      [1440, 844],
+      [800, 844],
+      [390, 844],
+      [320, 844],
+      [390, 300],
+    ]) {
+      await page.setViewportSize({ width, height });
+      await page
+        .getByRole("button", {
+          name: "Open application directory",
+          exact: true,
+        })
+        .click();
+      const panel = page.getByRole("region", {
+        name: "Applications",
+        exact: true,
+      });
+      await panel.getByRole("link", { name: "Health", exact: true }).waitFor();
+      const bounds = await panel.boundingBox();
+      assert.ok(
+        bounds.x >= 0 && bounds.x + bounds.width <= width,
+        `Apps popup must fit ${width}px viewport`,
+      );
+      assert.ok(
+        bounds.y >= 0 && bounds.y + bounds.height <= height,
+        "Apps popup must fit viewport height",
+      );
+      const tools = await page.locator(".workspace-tools").boundingBox();
+      assert.ok(
+        tools.x + tools.width >= width - 25,
+        "Tools must be right-aligned",
+      );
+      await page.screenshot({
+        path: `/tmp/aj-notes-apps-${width}-${height}.png`,
+      });
+      await page.keyboard.press("Escape");
+    }
+    await page.setViewportSize({ width: 1440, height: 1000 });
     await page.screenshot({
       path: "/tmp/aj-notes-desktop.png",
       fullPage: true,
@@ -468,30 +572,45 @@ const origin = process.env.NOTES_PREVIEW_URL || "http://localhost:3003";
     page.once("dialog", (dialog) => dialog.dismiss());
     await page.getByRole("button", { name: "New folder", exact: true }).click();
     assert.equal(await page.locator(".folder").count(), 1);
-    page.once("dialog", async (dialog) => {
-      assert.match(dialog.message(), /Sign out\?/i);
-      await dialog.dismiss();
-    });
     await page.getByRole("button", { name: "Sign out", exact: true }).click();
+    const confirmation = page.getByRole("dialog");
+    await confirmation
+      .getByRole("heading", { name: "Sign out?", exact: true })
+      .waitFor();
+    assert.equal(
+      await confirmation
+        .getByRole("button", { name: "Cancel", exact: true })
+        .evaluate((el) => el === document.activeElement),
+      true,
+    );
+    await page.screenshot({ path: "/tmp/aj-notes-confirm.png" });
+    await confirmation
+      .getByRole("button", { name: "Cancel", exact: true })
+      .click();
     await page
       .getByRole("textbox", { name: "Note title", exact: true })
       .waitFor();
-    page.once("dialog", (dialog) => dialog.dismiss());
     await page
       .getByRole("button", {
         name: "Delete Newest edit during sync",
         exact: true,
       })
       .click();
+    await confirmation
+      .getByRole("heading", { name: "Delete note?", exact: true })
+      .waitFor();
+    await page.keyboard.press("Escape");
     await page
       .getByRole("textbox", { name: "Note title", exact: true })
       .waitFor();
-    page.once("dialog", (dialog) => dialog.accept());
     await page
       .getByRole("button", {
         name: "Delete Newest edit during sync",
         exact: true,
       })
+      .click();
+    await confirmation
+      .getByRole("button", { name: "Delete", exact: true })
       .click();
     await page
       .getByRole("button", {

@@ -1,18 +1,15 @@
 "use client";
 import { useEffect, useState, useRef, useCallback } from "react";
 import dynamic from "next/dynamic";
+import { usePathname } from "next/navigation";
+import { ActionIcon } from "./action-icon";
+import { ConfirmDialog } from "./confirm-dialog";
 import { signIn, signOut } from "next-auth/react";
 import { AppLauncher } from "@ajoseph/app-launcher";
 import * as local from "@/lib/local";
 import { TrashIcon } from "./trash-icon";
 import { prepareOfflineShell } from "@/lib/offline-shell";
-import {
-  defaults,
-  plainText,
-  type RecordRow,
-  type Data,
-  type Block,
-} from "@/lib/model";
+import { defaults, plainText, type RecordRow, type Data } from "@/lib/model";
 const Editor = dynamic(() => import("./editor"), {
   ssr: false,
   loading: () => <p>Opening editor…</p>,
@@ -21,16 +18,36 @@ export default function Workspace() {
   const [ready, setReady] = useState(false),
     [login, setLogin] = useState(false),
     [rows, setRows] = useState<RecordRow[]>([]),
-    [active, setActive] = useState<string | null>(null),
     [folder, setFolder] = useState("all"),
     [search, setSearch] = useState(""),
     [tab, setTab] = useState<"original" | "summary">("original"),
     [history, setHistory] = useState<string | null>(null),
-    [showSettings, setShowSettings] = useState(false),
     [status, setStatus] = useState("Opening your notes…"),
     [error, setError] = useState(""),
     [busy, setBusy] = useState(false),
     [count, setCount] = useState(0);
+  const pathname = usePathname();
+  const active = pathname.startsWith("/notes/") ? pathname.split("/")[2] : null;
+  const showSettings = pathname === "/settings";
+  const lastNote = useRef<string | null>(null);
+  const [confirmation, setConfirmation] = useState<{
+    title: string;
+    message: string;
+    label: string;
+    action: () => void | Promise<void>;
+  } | null>(null);
+  function navigate(path: string) {
+    window.history.pushState(null, "", path);
+  }
+  function setActive(id: string | null) {
+    navigate(id ? `/notes/${id}` : "/");
+  }
+  function closeSettings() {
+    navigate(lastNote.current ? `/notes/${lastNote.current}` : "/");
+  }
+  useEffect(() => {
+    if (active) lastNote.current = active;
+  }, [active]);
   const shellReady = useRef(false);
   const syncing = useRef(false),
     alive = useRef(true),
@@ -114,8 +131,9 @@ export default function Workspace() {
         }
         await local.initialize(owner!);
         if (!alive.current) return;
-        setReady(true);
         await reload();
+        if (!alive.current) return;
+        setReady(true);
         void doSync();
         void navigator.storage?.persist?.();
       } catch (e) {
@@ -228,27 +246,31 @@ export default function Workspace() {
     setBusy(false);
   }
   function deleteNote(row: RecordRow) {
-    if (
-      !confirm(
-        `Delete "${row.data.title || "Untitled"}" and all its summaries?`,
-      )
-    )
-      return;
-    edit(row, latest.current.get(row.id) || row.data, true);
-    if (active === row.id) setActive(null);
+    setConfirmation({
+      title: "Delete note?",
+      message: `“${row.data.title || "Untitled"}” and all its summaries will be deleted.`,
+      label: "Delete",
+      action: () => {
+        edit(row, latest.current.get(row.id) || row.data, true);
+        if (active === row.id) {
+          lastNote.current = null;
+          setActive(null);
+        }
+      },
+    });
   }
-  async function logout() {
-    if (
-      !confirm(
-        count
-          ? "Unsynced changes will be removed from this device. Sign out?"
-          : "Sign out?",
-      )
-    )
-      return;
-    await run(async () => {
-      await local.clearLocal();
-      await signOut({ callbackUrl: "/" });
+  function logout() {
+    setConfirmation({
+      title: "Sign out?",
+      message: count
+        ? "Unsynced changes will be removed from this device."
+        : "This device’s local copy will be removed.",
+      label: "Sign out",
+      action: () =>
+        run(async () => {
+          await local.clearLocal();
+          await signOut({ callbackUrl: "/" });
+        }),
     });
   }
   if (!ready)
@@ -268,46 +290,56 @@ export default function Workspace() {
     );
   return (
     <div className="shell">
-      <aside className="sidebar">
-        <div className="brand">
-          <div className="wordmark">Notes</div>
-        </div>
+      <header className="workspace-header">
+        <a
+          className="header-brand"
+          href="/"
+          onClick={(e) => {
+            e.preventDefault();
+            setActive(null);
+          }}
+        >
+          Notes
+        </a>
         <div
           className="workspace-tools"
           role="group"
           aria-label="Workspace actions"
         >
-          <AppLauncher
-            currentApp="notes"
-            registryUrl={process.env.NEXT_PUBLIC_AJ_REGISTRY_URL || undefined}
-            allowLocalhost={
-              process.env.NODE_ENV === "development" &&
-              process.env.NEXT_PUBLIC_AJ_LOCAL_DEVELOPMENT === "true"
-            }
-          />
           <button
             aria-label="Sync"
             title={count ? `Sync (${count} pending)` : "Sync"}
             onClick={() => void doSync()}
             disabled={busy}
           >
-            ↻
+            <ActionIcon name="sync" />
           </button>
           <button
             aria-label="Settings"
             title="Settings"
-            onClick={() => setShowSettings(true)}
+            onClick={() => navigate("/settings")}
           >
-            ⚙
+            <ActionIcon name="settings" />
           </button>
           <button
             aria-label="Sign out"
             title="Sign out"
             onClick={() => void logout()}
           >
-            ⇥
+            <ActionIcon name="logout" />
           </button>
+          <AppLauncher
+            currentApp="notes"
+            iconOnly
+            registryUrl={process.env.NEXT_PUBLIC_AJ_REGISTRY_URL || undefined}
+            allowLocalhost={
+              process.env.NODE_ENV === "development" &&
+              process.env.NEXT_PUBLIC_AJ_LOCAL_DEVELOPMENT === "true"
+            }
+          />
         </div>
+      </header>
+      <aside className="sidebar">
         <button className="primary" onClick={() => void createNote()}>
           ＋ New note
         </button>
@@ -371,14 +403,15 @@ export default function Workspace() {
                 title={`Delete ${f.data.title}`}
                 className="danger"
                 onClick={() => {
-                  if (
-                    confirm(
-                      "Delete this folder? Its notes will move to Unfiled.",
-                    )
-                  ) {
-                    edit(f, f.data, true);
-                    setFolder("all");
-                  }
+                  setConfirmation({
+                    title: "Delete folder?",
+                    message: `“${f.data.title}” will be deleted. Its notes will move to Unfiled.`,
+                    label: "Delete",
+                    action: () => {
+                      edit(f, f.data, true);
+                      setFolder("all");
+                    },
+                  });
                 }}
               >
                 <TrashIcon />
@@ -444,7 +477,24 @@ export default function Workspace() {
             </button>
           </div>
         )}
-        {note ? (
+        {showSettings ? (
+          <Settings
+            data={settings}
+            close={closeSettings}
+            save={(data) => {
+              const row = rows.find((r) => r.kind === "settings") || {
+                id: local.SETTINGS_ID,
+                kind: "settings" as const,
+                revision: 0,
+                deleted: false,
+                data: {},
+              };
+              if (!rows.includes(row)) setRows((old) => [...old, row]);
+              edit(row, data);
+              closeSettings();
+            }}
+          />
+        ) : note ? (
           <article className="document">
             <div className="document-top">
               <select
@@ -574,14 +624,16 @@ export default function Workspace() {
                       aria-label="Delete summary version"
                       title="Delete summary version"
                       onClick={() => {
-                        if (
-                          confirm(
-                            "Delete this summary version? Other versions will be kept.",
-                          )
-                        ) {
-                          edit(summary, summary.data, true);
-                          setHistory(null);
-                        }
+                        setConfirmation({
+                          title: "Delete summary?",
+                          message:
+                            "This summary version will be deleted. Other versions will be kept.",
+                          label: "Delete",
+                          action: () => {
+                            edit(summary, summary.data, true);
+                            setHistory(null);
+                          },
+                        });
                       }}
                     >
                       <TrashIcon />
@@ -630,30 +682,15 @@ export default function Workspace() {
           </article>
         ) : (
           <div className="empty welcome">
-            <h1>Notes</h1>
+            <h1>{active ? "Note not found" : "Notes"}</h1>
             <button className="primary" onClick={() => void createNote()}>
               ＋ Write a note
             </button>
           </div>
         )}
       </main>
-      {showSettings && (
-        <Settings
-          data={settings}
-          close={() => setShowSettings(false)}
-          save={(data) => {
-            const row = rows.find((r) => r.kind === "settings") || {
-              id: local.SETTINGS_ID,
-              kind: "settings" as const,
-              revision: 0,
-              deleted: false,
-              data: {},
-            };
-            if (!rows.includes(row)) setRows((old) => [...old, row]);
-            edit(row, data);
-            setShowSettings(false);
-          }}
-        />
+      {confirmation && (
+        <ConfirmDialog {...confirmation} close={() => setConfirmation(null)} />
       )}
     </div>
   );
@@ -669,12 +706,8 @@ function Settings({
 }) {
   const [model, setModel] = useState(String(data.model)),
     [instructions, setInstructions] = useState(String(data.instructions));
-  const ref = useRef<HTMLDialogElement>(null);
-  useEffect(() => {
-    ref.current?.showModal();
-  }, []);
   return (
-    <dialog ref={ref} onCancel={close} aria-labelledby="settings-title">
+    <section className="settings-page" aria-labelledby="settings-title">
       <form
         onSubmit={(e) => {
           e.preventDefault();
@@ -682,7 +715,7 @@ function Settings({
         }}
       >
         <div className="dialog-top">
-          <h2 id="settings-title">Your preferences</h2>
+          <h2 id="settings-title">Settings</h2>
           <button type="button" aria-label="Close settings" onClick={close}>
             ×
           </button>
@@ -722,6 +755,6 @@ function Settings({
         />
         <button className="primary">Save settings</button>
       </form>
-    </dialog>
+    </section>
   );
 }

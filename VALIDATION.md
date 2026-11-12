@@ -38,3 +38,10 @@ For browser tests, install Playwright in your test tooling, start the production
 - Chrome acceptance checks passed against the production build with browser-only API fixtures: editing, images, diagrams, summaries, offline reopening, retry and in-flight edits, Settings, and mobile overflow.
 - Added browser checks passed for named folder creation, canceled creation, canceled logout, canceled note deletion, and confirmed deletion from the note list. Desktop and mobile screenshots were inspected.
 - Live authentication, hosted services, and physical devices were not exercised.
+
+## Routed workspace follow-up verified on 2026-11-13
+
+- Notes use `/notes/[id]`; Settings uses `/settings`. Chrome checks cover direct reloads, offline reopening, saved preferences, and browser Back/Forward.
+- Custom delete/sign-out dialogs were checked for initial Cancel focus, cancellation, Escape dismissal, and confirmed note deletion.
+- Header controls and the loaded Apps popup were checked at desktop, tablet, 390px and 320px widths, plus a short viewport. Screenshots were inspected for placement and clipping.
+- Production build, TypeScript, formatting, and 12 unit/API tests passed. The 11 PostgreSQL tests remain skipped without an isolated test database.

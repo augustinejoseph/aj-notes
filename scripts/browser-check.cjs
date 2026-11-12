@@ -200,7 +200,7 @@ const origin = process.env.NOTES_PREVIEW_URL || "http://localhost:3003";
       .getByRole("textbox", { name: "Mermaid source", exact: true })
       .waitFor();
     await page.getByAltText("Mermaid diagram", { exact: true }).waitFor();
-    await page.getByRole("button", { name: /^↻ Sync/ }).click();
+    await page.getByRole("button", { name: "Sync", exact: true }).click();
     await page
       .getByRole("status")
       .filter({ hasText: "All notes and images available offline" })
@@ -243,7 +243,7 @@ const origin = process.env.NOTES_PREVIEW_URL || "http://localhost:3003";
     await editable.click();
     await page.keyboard.press("End");
     await page.keyboard.type(" My manual tweak.");
-    await page.getByRole("button", { name: /^↻ Sync/ }).click();
+    await page.getByRole("button", { name: "Sync", exact: true }).click();
     await page
       .getByRole("status")
       .filter({ hasText: "All notes and images available offline" })
@@ -304,10 +304,10 @@ const origin = process.env.NOTES_PREVIEW_URL || "http://localhost:3003";
       .waitFor();
     await context.setOffline(false);
     failNext = true;
-    await page.getByRole("button", { name: /^↻ Sync/ }).click();
+    await page.getByRole("button", { name: "Sync", exact: true }).click();
     await page.getByRole("alert").first().waitFor();
     const receiptCount = receipts.size;
-    await page.getByRole("button", { name: /^↻ Sync/ }).click();
+    await page.getByRole("button", { name: "Sync", exact: true }).click();
     await page
       .getByRole("status")
       .filter({ hasText: "All notes and images available offline" })
@@ -362,7 +362,7 @@ const origin = process.env.NOTES_PREVIEW_URL || "http://localhost:3003";
     const started = new Promise((resolve) => {
       requestStarted = resolve;
     });
-    await page.getByRole("button", { name: /^↻ Sync/ }).click();
+    await page.getByRole("button", { name: "Sync", exact: true }).click();
     await started;
     await page
       .getByRole("textbox", { name: "Note title", exact: true })
@@ -373,7 +373,7 @@ const origin = process.env.NOTES_PREVIEW_URL || "http://localhost:3003";
       .getByRole("status")
       .filter({ hasText: "more changes awaiting sync" })
       .waitFor();
-    await page.getByRole("button", { name: /^↻ Sync/ }).click();
+    await page.getByRole("button", { name: "Sync", exact: true }).click();
     await page
       .getByRole("status")
       .filter({ hasText: "All notes and images available offline" })
@@ -382,7 +382,7 @@ const origin = process.env.NOTES_PREVIEW_URL || "http://localhost:3003";
       [...data.values()].find((r) => r.kind === "notes").data.title,
       "Newest edit during sync",
     );
-    await page.getByRole("button", { name: "⚙ Settings", exact: true }).click();
+    await page.getByRole("button", { name: "Settings", exact: true }).click();
     await page.getByRole("dialog").waitFor();
     await page
       .getByLabel("Summary instructions", { exact: true })
@@ -390,7 +390,7 @@ const origin = process.env.NOTES_PREVIEW_URL || "http://localhost:3003";
     await page
       .getByRole("button", { name: "Save settings", exact: true })
       .click();
-    await page.getByRole("button", { name: /^↻ Sync/ }).click();
+    await page.getByRole("button", { name: "Sync", exact: true }).click();
     await page
       .getByRole("status")
       .filter({ hasText: "All notes and images available offline" })
@@ -453,6 +453,60 @@ const origin = process.env.NOTES_PREVIEW_URL || "http://localhost:3003";
     assert.deepEqual(errors, []);
     console.log(
       "Browser checks passed: editor, mixed image paste, Mermaid offline, summary editing, offline reopen, lost-response retry, in-flight edits, settings, and mobile layout.",
+    );
+    console.log("Checking folder names and destructive action confirmations");
+    await page.setViewportSize({ width: 1440, height: 1000 });
+    page.removeAllListeners("dialog");
+    page.once("dialog", async (dialog) => {
+      assert.equal(dialog.type(), "prompt");
+      await dialog.accept("Named folder");
+    });
+    await page.getByRole("button", { name: "New folder", exact: true }).click();
+    await page
+      .getByRole("button", { name: "▱ Named folder", exact: true })
+      .waitFor();
+    page.once("dialog", (dialog) => dialog.dismiss());
+    await page.getByRole("button", { name: "New folder", exact: true }).click();
+    assert.equal(await page.locator(".folder").count(), 1);
+    page.once("dialog", async (dialog) => {
+      assert.match(dialog.message(), /Sign out\?/i);
+      await dialog.dismiss();
+    });
+    await page.getByRole("button", { name: "Sign out", exact: true }).click();
+    await page
+      .getByRole("textbox", { name: "Note title", exact: true })
+      .waitFor();
+    page.once("dialog", (dialog) => dialog.dismiss());
+    await page
+      .getByRole("button", {
+        name: "Delete Newest edit during sync",
+        exact: true,
+      })
+      .click();
+    await page
+      .getByRole("textbox", { name: "Note title", exact: true })
+      .waitFor();
+    page.once("dialog", (dialog) => dialog.accept());
+    await page
+      .getByRole("button", {
+        name: "Delete Newest edit during sync",
+        exact: true,
+      })
+      .click();
+    await page
+      .getByRole("button", {
+        name: "Delete Newest edit during sync",
+        exact: true,
+      })
+      .waitFor({ state: "detached" });
+    assert.equal(
+      await page
+        .getByRole("textbox", { name: "Note title", exact: true })
+        .count(),
+      0,
+    );
+    console.log(
+      "Folder naming, cancel, logout confirmation, and note deletion passed.",
     );
     await context.close();
   } finally {

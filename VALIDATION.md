@@ -30,3 +30,11 @@ For browser tests, install Playwright in your test tooling, start the production
 - Dependency installation audit reported zero vulnerabilities after patched transitive UUID and KaTeX overrides.
 - Docker Compose configuration was validated with a temporary empty Notes environment override; real Notes credentials have not been supplied.
 - Live Google OAuth, Neon, OpenRouter, Vercel deployment, and physical-device tests remain unverified.
+
+## Workspace refresh verified on 2026-11-13
+
+- TypeScript, formatting, and production build passed, including the offline asset manifest.
+- 12 unit/API tests passed; 11 PostgreSQL integration tests were skipped without an isolated test database.
+- Chrome acceptance checks passed against the production build with browser-only API fixtures: editing, images, diagrams, summaries, offline reopening, retry and in-flight edits, Settings, and mobile overflow.
+- Added browser checks passed for named folder creation, canceled creation, canceled logout, canceled note deletion, and confirmed deletion from the note list. Desktop and mobile screenshots were inspected.
+- Live authentication, hosted services, and physical devices were not exercised.

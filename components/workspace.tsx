@@ -227,11 +227,22 @@ export default function Workspace() {
     });
     setBusy(false);
   }
+  function deleteNote(row: RecordRow) {
+    if (
+      !confirm(
+        `Delete "${row.data.title || "Untitled"}" and all its summaries?`,
+      )
+    )
+      return;
+    edit(row, latest.current.get(row.id) || row.data, true);
+    if (active === row.id) setActive(null);
+  }
   async function logout() {
     if (
-      count &&
       !confirm(
-        "There are unsynced changes. Signing out removes this device’s local copy. Sign out anyway?",
+        count
+          ? "Unsynced changes will be removed from this device. Sign out?"
+          : "Sign out?",
       )
     )
       return;
@@ -243,17 +254,8 @@ export default function Workspace() {
   if (!ready)
     return (
       <main className="login">
-        <div className="wordmark">
-          AJ Notes<span>A PRIVATE HOME FOR YOUR IDEAS</span>
-        </div>
+        <div className="wordmark">AJ Notes</div>
         <section>
-          <p className="eyebrow">THINK. WRITE. KEEP.</p>
-          <h1>
-            A little room
-            <br />
-            for everything.
-          </h1>
-          <p>Your notes, diagrams, and ideas. Always close at hand.</p>
           {login && (
             <button className="primary" onClick={() => void signIn("google")}>
               Continue with Google →
@@ -262,16 +264,19 @@ export default function Workspace() {
           <p role="status">{status}</p>
           {error && <p role="alert">{error}</p>}
         </section>
-        <small>Private by design · AJ Series</small>
       </main>
     );
   return (
     <div className="shell">
       <aside className="sidebar">
         <div className="brand">
-          <div className="wordmark">
-            Notes<span>AJ SERIES / YOUR WORKSPACE</span>
-          </div>
+          <div className="wordmark">Notes</div>
+        </div>
+        <div
+          className="workspace-tools"
+          role="group"
+          aria-label="Workspace actions"
+        >
           <AppLauncher
             currentApp="notes"
             registryUrl={process.env.NEXT_PUBLIC_AJ_REGISTRY_URL || undefined}
@@ -280,14 +285,36 @@ export default function Workspace() {
               process.env.NEXT_PUBLIC_AJ_LOCAL_DEVELOPMENT === "true"
             }
           />
+          <button
+            aria-label="Sync"
+            title={count ? `Sync (${count} pending)` : "Sync"}
+            onClick={() => void doSync()}
+            disabled={busy}
+          >
+            ↻
+          </button>
+          <button
+            aria-label="Settings"
+            title="Settings"
+            onClick={() => setShowSettings(true)}
+          >
+            ⚙
+          </button>
+          <button
+            aria-label="Sign out"
+            title="Sign out"
+            onClick={() => void logout()}
+          >
+            ⇥
+          </button>
         </div>
         <button className="primary" onClick={() => void createNote()}>
           ＋ New note
         </button>
         <label className="search">
-          Search notes
           <input
-            placeholder="Find an idea…"
+            aria-label="Search notes"
+            placeholder="Search notes"
             value={search}
             onChange={(e) => setSearch(e.target.value)}
           />
@@ -359,14 +386,9 @@ export default function Workspace() {
             </div>
           ))}
         </nav>
-        <div className="sidebar-bottom">
-          <button onClick={() => setShowSettings(true)}>⚙ Settings</button>
-          <button onClick={() => void logout()}>Sign out</button>
-        </div>
       </aside>
       <section className="note-list">
         <div className="list-heading">
-          <p className="eyebrow">YOUR COLLECTION</p>
           <h2>
             {folder === "all"
               ? "All notes"
@@ -377,36 +399,39 @@ export default function Workspace() {
         </div>
         {filtered.length ? (
           filtered.map((n) => (
-            <button
+            <div
               key={n.id}
-              className={`note-item ${n.id === active ? "selected" : ""}`}
-              onClick={() => {
-                setActive(n.id);
-                setTab("original");
-                setHistory(null);
-              }}
+              className={`note-row ${n.id === active ? "selected" : ""}`}
             >
-              <strong>{n.data.title || "Untitled"}</strong>
-              <p>
-                {plainText(n.data.document).slice(0, 100) ||
-                  "A fresh page, ready for an idea."}
-              </p>
-              {n.data.conflictOf && (
-                <small>Conflict copy · compare with original</small>
-              )}
-            </button>
+              <button
+                className="note-item"
+                onClick={() => {
+                  setActive(n.id);
+                  setTab("original");
+                  setHistory(null);
+                }}
+              >
+                <strong>{n.data.title || "Untitled"}</strong>
+                <p>{plainText(n.data.document).slice(0, 100)}</p>
+                {n.data.conflictOf && (
+                  <small>Conflict copy · compare with original</small>
+                )}
+              </button>
+              <button
+                className="danger note-delete"
+                aria-label={`Delete ${n.data.title || "Untitled"}`}
+                title="Delete note"
+                onClick={() => deleteNote(n)}
+              >
+                <TrashIcon />
+              </button>
+            </div>
           ))
         ) : (
           <p className="empty-list">No notes here yet.</p>
         )}
       </section>
       <main className="main">
-        <header>
-          <span className="eyebrow">YOUR PRIVATE WORKSPACE</span>
-          <button onClick={() => void doSync()} disabled={busy}>
-            ↻ Sync {count ? `(${count} pending)` : ""}
-          </button>
-        </header>
         <div className="sync-status" role="status">
           {status}
         </div>
@@ -447,14 +472,7 @@ export default function Workspace() {
                 className="danger"
                 aria-label="Delete note"
                 title="Delete note"
-                onClick={() => {
-                  if (
-                    confirm("Delete this note and all its summary versions?")
-                  ) {
-                    edit(note, note.data, true);
-                    setActive(null);
-                  }
-                }}
+                onClick={() => deleteNote(note)}
               >
                 <TrashIcon />
               </button>
@@ -604,11 +622,7 @@ export default function Workspace() {
                   </>
                 ) : (
                   <div className="empty">
-                    <h2>A shorter way back to your ideas.</h2>
-                    <p>
-                      Use Summarize to create an editable summary. Your original
-                      stays here.
-                    </p>
+                    <p>No summary</p>
                   </div>
                 )}
               </>
@@ -616,13 +630,7 @@ export default function Workspace() {
           </article>
         ) : (
           <div className="empty welcome">
-            <p className="eyebrow">MAKE SPACE FOR A THOUGHT</p>
-            <h1>
-              Every idea
-              <br />
-              starts somewhere.
-            </h1>
-            <p>Choose a note or begin with a fresh page.</p>
+            <h1>Notes</h1>
             <button className="primary" onClick={() => void createNote()}>
               ＋ Write a note
             </button>
@@ -679,10 +687,6 @@ function Settings({
             ×
           </button>
         </div>
-        <p className="muted">
-          AI runs only when you choose Summarize. Your API key stays on the
-          server.
-        </p>
         {data.conflictingSettings &&
         typeof data.conflictingSettings === "object" ? (
           <div className="notice">

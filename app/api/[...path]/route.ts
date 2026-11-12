@@ -3,6 +3,12 @@ import { sql } from "@/lib/db";
 import { mutate, summarize, lock, pullChanges } from "@/lib/server";
 import { mutationSchema } from "@/lib/model";
 import { z } from "zod";
+import { fetchRemoteImage } from "@/lib/remote-image";
+import {
+  IMAGE_TYPES,
+  MAX_IMAGE_BYTES,
+  validImageHeader,
+} from "@/lib/image-file";
 export const runtime = "nodejs";
 export const maxDuration = 60;
 const uuid = z.uuid();
@@ -53,6 +59,16 @@ async function handle(
         await summarize(owner, data.id, data.noteId, data.revision),
       );
     }
+    if (
+      path.length === 1 &&
+      path[0] === "image-import" &&
+      req.method === "POST"
+    ) {
+      const { url } = z
+        .object({ url: z.string().url().max(4096) })
+        .parse(await limitedJson(req, 8192));
+      return await fetchRemoteImage(url);
+    }
     if (path[0] === "images") {
       const id = uuid.parse(path[1]);
       if (req.method === "GET") {
@@ -70,33 +86,12 @@ async function handle(
       }
       if (req.method === "PUT") {
         const mime = req.headers.get("content-type") || "";
-        if (
-          ![
-            "image/png",
-            "image/jpeg",
-            "image/webp",
-            "image/gif",
-            "image/avif",
-          ].includes(mime)
-        )
+        if (!IMAGE_TYPES.includes(mime))
           throw new Error("Supported images: PNG, JPEG, WebP, GIF, AVIF");
-        const bytes = await limitedBytes(req, 4_000_000);
+        const bytes = await limitedBytes(req, MAX_IMAGE_BYTES);
         const file = Buffer.from(bytes);
-        const valid =
-          mime === "image/png"
-            ? file
-                .subarray(0, 8)
-                .equals(Buffer.from([137, 80, 78, 71, 13, 10, 26, 10]))
-            : mime === "image/jpeg"
-              ? file[0] === 255 && file[1] === 216
-              : mime === "image/gif"
-                ? file.subarray(0, 3).toString() === "GIF"
-                : mime === "image/webp"
-                  ? file.subarray(0, 4).toString() === "RIFF" &&
-                    file.subarray(8, 12).toString() === "WEBP"
-                  : file.subarray(4, 8).toString() === "ftyp" &&
-                    file.subarray(8, 32).includes(Buffer.from("avif"));
-        if (!valid) throw new Error("Image bytes do not match the file type");
+        if (!validImageHeader(file, mime))
+          throw new Error("Image bytes do not match the file type");
         await sql().begin(async (tx) => {
           await lock(tx, owner);
           const [old] = await tx`SELECT owner,bytes FROM images WHERE id=${id}`;

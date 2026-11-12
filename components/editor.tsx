@@ -7,13 +7,18 @@ import {
   type PartialBlock,
 } from "@blocknote/core";
 import {
+  FilePanelController,
+  UploadTab,
+  useComponentsContext,
+  useBlockNoteEditor,
+  type FilePanelProps,
   createReactBlockSpec,
   useCreateBlockNote,
   SuggestionMenuController,
   getDefaultReactSlashMenuItems,
 } from "@blocknote/react";
 import { BlockNoteView } from "@blocknote/mantine";
-import { imageURL, putImage } from "@/lib/local";
+import { imageURL, putImage, importImage } from "@/lib/local";
 import type { Block } from "@/lib/model";
 import "@blocknote/core/fonts/inter.css";
 import "@blocknote/mantine/style.css";
@@ -98,6 +103,69 @@ const { audio: _, video: __, file: ___, ...coreBlocks } = defaultBlockSpecs;
 const schema = BlockNoteSchema.create({
   blockSpecs: { ...coreBlocks, mermaid: mermaidBlock() },
 });
+function ImageEmbed({ blockId }: FilePanelProps) {
+  const editor = useBlockNoteEditor<typeof schema.blockSchema>();
+  const [url, setURL] = useState(""),
+    [busy, setBusy] = useState(false),
+    [error, setError] = useState("");
+  return (
+    <form
+      className="image-embed"
+      onSubmit={async (event) => {
+        event.preventDefault();
+        if (busy) return;
+        setBusy(true);
+        setError("");
+        try {
+          const path = await importImage(url);
+          if (editor.getBlock(blockId))
+            editor.updateBlock(blockId, { props: { url: path } });
+        } catch (e) {
+          setError(
+            e instanceof Error ? e.message : "Image could not be embedded",
+          );
+        } finally {
+          setBusy(false);
+        }
+      }}
+    >
+      <input
+        aria-label="Image URL"
+        placeholder="https://…"
+        type="url"
+        required
+        value={url}
+        disabled={busy}
+        onChange={(e) => setURL(e.target.value)}
+      />
+      <button className="primary" disabled={busy} type="submit">
+        {busy ? "Adding image…" : "Embed image"}
+      </button>
+      {error && <p role="alert">{error}</p>}
+    </form>
+  );
+}
+function ImagePanel({ blockId }: FilePanelProps) {
+  const Components = useComponentsContext()!;
+  const [tab, setTab] = useState("Upload"),
+    [loading, setLoading] = useState(false);
+  return (
+    <Components.FilePanel.Root
+      className="bn-panel"
+      defaultOpenTab="Upload"
+      openTab={tab}
+      setOpenTab={setTab}
+      loading={loading}
+      tabs={[
+        {
+          name: "Upload",
+          tabPanel: <UploadTab blockId={blockId} setLoading={setLoading} />,
+        },
+        { name: "Embed", tabPanel: <ImageEmbed blockId={blockId} /> },
+      ]}
+    />
+  );
+}
 export default function Editor({
   document,
   onChange,
@@ -177,13 +245,15 @@ export default function Editor({
             !path.startsWith(`blob:${location.origin}/`)
           )
             throw new Error("Image unavailable");
-          const response = await fetch(path, {
-            credentials: "omit",
-            referrerPolicy: "no-referrer",
-            signal: AbortSignal.timeout(10000),
-          });
-          if (!response.ok) throw new Error("Image unavailable");
-          image.setAttribute("src", await putImage(await response.blob()));
+          if (/^https?:\/\//i.test(path)) {
+            image.setAttribute("src", await importImage(path));
+          } else {
+            const response = await fetch(path, {
+              signal: AbortSignal.timeout(10000),
+            });
+            if (!response.ok) throw new Error("Image unavailable");
+            image.setAttribute("src", await putImage(await response.blob()));
+          }
         } catch {
           const placeholder = parsed.createElement("p");
           placeholder.textContent = `[Image could not be copied${image.alt ? `: ${image.alt}` : ""}. Use /image to upload the original image.]`;
@@ -226,7 +296,9 @@ export default function Editor({
         editable={!readOnly}
         theme="light"
         slashMenu={false}
+        filePanel={false}
       >
+        <FilePanelController filePanel={ImagePanel} />
         <SuggestionMenuController
           triggerCharacter="/"
           getItems={async (query) =>

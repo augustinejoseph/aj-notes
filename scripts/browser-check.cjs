@@ -28,6 +28,20 @@ const origin = process.env.NOTES_PREVIEW_URL || "http://localhost:3003";
         return route.fulfill({
           json: { owner: "browser-test-owner", email: "owner@example.test" },
         });
+      if (url.pathname === "/api/image-import") {
+        if (req.postDataJSON().url !== "https://images.example.test/photo.png")
+          return route.fulfill({
+            status: 400,
+            json: { error: "The URL must point directly to an image" },
+          });
+        return route.fulfill({
+          contentType: "image/png",
+          body: Buffer.from(
+            "iVBORw0KGgoAAAANSUhEUgAAAAEAAAABCAQAAAC1HAwCAAAAC0lEQVR42mP8/x8AAwMCAO+jRZkAAAAASUVORK5CYII=",
+            "base64",
+          ),
+        });
+      }
       if (url.pathname.startsWith("/api/images/")) {
         const id = url.pathname.split("/").pop();
         if (req.method() === "PUT") {
@@ -468,6 +482,96 @@ const origin = process.env.NOTES_PREVIEW_URL || "http://localhost:3003";
       "Diagram must visibly render",
     );
 
+    console.log("Embedding a URL and compressing a large image upload");
+    async function addImageBlock() {
+      await editable.click();
+      await page.keyboard.press("ControlOrMeta+End");
+      await page.keyboard.press("Enter");
+      await page.keyboard.type("/image");
+      await page.getByText("Image", { exact: true }).click();
+      await page.getByRole("tab", { name: "Upload", exact: true }).waitFor();
+    }
+    await addImageBlock();
+    await page.getByRole("tab", { name: "Embed", exact: true }).click();
+    await page
+      .getByRole("textbox", { name: "Image URL", exact: true })
+      .fill("https://images.example.test/not-an-image");
+    await page
+      .getByRole("button", { name: "Embed image", exact: true })
+      .click();
+    await page
+      .getByRole("alert")
+      .filter({ hasText: "directly to an image" })
+      .waitFor();
+    await page
+      .getByRole("textbox", { name: "Image URL", exact: true })
+      .fill("https://images.example.test/photo.png");
+    await page
+      .getByRole("button", { name: "Embed image", exact: true })
+      .click();
+    await page.waitForFunction(
+      () => document.querySelectorAll('article img[src^="blob:"]').length >= 3,
+    );
+    await addImageBlock();
+    const largePNG = Buffer.from(
+      await page.evaluate(() => {
+        const canvas = document.createElement("canvas");
+        canvas.width = 1800;
+        canvas.height = 1200;
+        const ctx = canvas.getContext("2d");
+        const pixels = ctx.createImageData(canvas.width, canvas.height);
+        let seed = 123456;
+        for (let i = 0; i < pixels.data.length; i += 4) {
+          for (let c = 0; c < 3; c++) {
+            seed = (Math.imul(seed, 1664525) + 1013904223) >>> 0;
+            pixels.data[i + c] = seed >>> 24;
+          }
+          pixels.data[i + 3] = 255;
+        }
+        ctx.putImageData(pixels, 0, 0);
+        return canvas.toDataURL("image/png").split(",")[1];
+      }),
+      "base64",
+    );
+    assert.ok(
+      largePNG.length > 4_000_000,
+      "Upload fixture must exceed the old image limit",
+    );
+    await page.locator('input[type="file"]').setInputFiles({
+      name: "large-photo.png",
+      mimeType: "image/png",
+      buffer: largePNG,
+    });
+    await page.waitForFunction(
+      () => document.querySelectorAll('article img[src^="blob:"]').length >= 4,
+    );
+    await page.getByRole("button", { name: "Sync", exact: true }).click();
+    await page
+      .getByRole("status")
+      .filter({ hasText: "All notes and images available offline" })
+      .waitFor();
+    assert.equal(
+      images.size,
+      3,
+      "Paste, embed and upload must each create one attachment",
+    );
+    const compressedImage = [...images.values()].find(
+      (image) => image.mime === "image/webp",
+    );
+    assert.ok(compressedImage, "Large PNG must be compressed to WebP");
+    assert.ok(
+      compressedImage.bytes.length < 1_000_000,
+      "Compressed upload must stay below 1 MB",
+    );
+    for (const row of [...data.values()].filter(
+      (row) => row.kind === "notes",
+    )) {
+      assert.equal(
+        /https:\/\/images.example/.test(JSON.stringify(row)),
+        false,
+        "Only internal attachment URLs may be persisted",
+      );
+    }
     console.log("Checking routes, browser history, and Apps popup bounds");
     await page.getByRole("button", { name: "Settings", exact: true }).click();
     await page.goBack();
@@ -501,6 +605,13 @@ const origin = process.env.NOTES_PREVIEW_URL || "http://localhost:3003";
       .getByRole("textbox", { name: "Note title", exact: true })
       .waitFor();
     assert.equal(new URL(page.url()).pathname, notePath);
+    await page.waitForFunction(() => {
+      const images = [...document.querySelectorAll("article img")];
+      return (
+        images.length >= 4 &&
+        images.every((image) => image.complete && image.naturalWidth > 0)
+      );
+    });
     await context.setOffline(false);
     for (const [width, height] of [
       [1440, 844],

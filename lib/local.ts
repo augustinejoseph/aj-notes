@@ -1,5 +1,6 @@
 "use client";
 import { openDB, deleteDB, type IDBPDatabase } from "idb";
+import { prepareImage } from "./image-file";
 import {
   type RecordRow,
   type Kind,
@@ -98,17 +99,7 @@ export async function save(
   });
 }
 export async function putImage(file: Blob): Promise<string> {
-  if (file.size > 4_000_000) throw new Error("Images must be 4 MB or smaller");
-  if (
-    ![
-      "image/png",
-      "image/jpeg",
-      "image/webp",
-      "image/gif",
-      "image/avif",
-    ].includes(file.type)
-  )
-    throw new Error("Use a PNG, JPEG, WebP, GIF, or AVIF image");
+  file = await prepareImage(file);
   const id = crypto.randomUUID();
   await exclusive(async () => {
     await (await database()).put("images", { id, blob: file, uploaded: false });
@@ -116,7 +107,24 @@ export async function putImage(file: Blob): Promise<string> {
   });
   return `/api/images/${id}`;
 }
+export async function importImage(value: string): Promise<string> {
+  const url = new URL(value.trim(), location.origin);
+  if (
+    url.origin === location.origin &&
+    /^\/api\/images\/[a-f0-9-]{36}$/.test(url.pathname)
+  ) {
+    await imageURL(url.pathname);
+    return url.pathname;
+  }
+  const response = await api("image-import", {
+    method: "POST",
+    headers: { "Content-Type": "application/json" },
+    body: JSON.stringify({ url: url.href }),
+  });
+  return putImage(await response.blob());
+}
 export async function imageURL(path: string): Promise<string> {
+  if (!path) return ""; // Empty image blocks have no attachment to resolve yet.
   const match = path.match(/^\/api\/images\/([a-f0-9-]{36})$/);
   if (!match)
     throw new Error("Image is not stored locally. Paste or upload it again.");

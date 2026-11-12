@@ -45,3 +45,11 @@ For browser tests, install Playwright in your test tooling, start the production
 - Custom delete/sign-out dialogs were checked for initial Cancel focus, cancellation, Escape dismissal, and confirmed note deletion.
 - Header controls and the loaded Apps popup were checked at desktop, tablet, 390px and 320px widths, plus a short viewport. Screenshots were inspected for placement and clipping.
 - Production build, TypeScript, formatting, and 12 unit/API tests passed. The 11 PostgreSQL tests remain skipped without an isolated test database.
+
+## Image embedding and compression verified on 2026-11-13
+
+- The Embed tab downloads public HTTPS image URLs into local attachments before updating the document. Mixed HTML paste shares the importer. Empty image blocks resolve without an unhandled error.
+- Production Chrome checks passed for invalid-URL feedback, successful URL embedding, a PNG upload over 4 MB compressed to WebP under 1 MB, syncing, and decoded images after offline reload. The existing editing, summaries, settings, routes, dialogs, and responsive checks also passed.
+- A real public HTTPS image download passed through the DNS-pinned importer, independently of browser fixtures.
+- 30 unit/API tests passed, including image validation/compression, authenticated import boundaries, blocked network destinations, redirect revalidation, and bounded response streams. The 11 database integration tests remain skipped without an isolated test database.
+- Production build, TypeScript, and formatting checks passed. Live owner authentication, hosted database writes, and physical-device behavior were not exercised.

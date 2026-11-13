@@ -540,6 +540,44 @@ export default function Workspace() {
                 })
               }
             />
+            {!!note.data.conflictVersions?.length && (
+              <details className="notice">
+                <summary>
+                  Saved versions from other devices (
+                  {note.data.conflictVersions.length})
+                </summary>
+                <p>
+                  The last synced edit is shown. Previous conflicting edits are
+                  saved here.
+                </p>
+                {note.data.conflictVersions.map((version) => (
+                  <details key={version.revision}>
+                    <summary>
+                      {version.title || "Untitled"} · revision{" "}
+                      {version.revision}
+                    </summary>
+                    <pre style={{ whiteSpace: "pre-wrap" }}>
+                      {plainText(version.document)}
+                    </pre>
+                    <button
+                      onClick={() => {
+                        const current =
+                          latest.current.get(note.id) || note.data;
+                        edit(note, {
+                          ...current,
+                          title: version.title,
+                          folderId: version.folderId,
+                          document: version.document,
+                          restoreConflictRevision: version.revision,
+                        });
+                      }}
+                    >
+                      Restore this version
+                    </button>
+                  </details>
+                ))}
+              </details>
+            )}
             {note.data.conflictOf && (
               <div className="notice">
                 This copy preserves conflicting edits.{" "}

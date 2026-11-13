@@ -84,7 +84,7 @@ describe.skipIf(!url)("PostgreSQL sync and summary integration", () => {
     expect(second.changes).toHaveLength(1);
     expect(second.more).toBe(false);
   });
-  it("keeps concurrent offline edits as separate notes", async () => {
+  it("keeps concurrent offline edits on one note", async () => {
     await mutate(owner, note());
     const [a, b] = await Promise.all([
       mutate(
@@ -105,9 +105,58 @@ describe.skipIf(!url)("PostgreSQL sync and summary integration", () => {
     expect([a.conflict, b.conflict].filter(Boolean)).toHaveLength(1);
     const rows =
       await sql()`SELECT * FROM notes WHERE owner=${owner} AND deleted=false`;
-    expect(rows).toHaveLength(2);
-    expect(rows.map((r) => r.data.title).join(" ")).toContain("Device A");
-    expect(rows.map((r) => r.data.title).join(" ")).toContain("Device B");
+    expect(rows).toHaveLength(1);
+    expect(rows[0].id).toBe(noteId);
+    const titles = [
+      rows[0].data.title,
+      ...rows[0].data.conflictVersions.map((v: { title: string }) => v.title),
+    ];
+    expect(titles).toContain("Device A");
+    expect(titles).toContain("Device B");
+  });
+  it("retains server-owned versions, restores, and retries without duplicating history", async () => {
+    await mutate(owner, note());
+    await mutate(
+      owner,
+      note({
+        baseRevision: 1,
+        data: { title: "Device A", folderId: null, document: [] },
+      }),
+    );
+    const upload = note({
+      baseRevision: 1,
+      data: { title: "Device B", folderId: null, document: [] },
+    });
+    const conflict = await mutate(owner, upload);
+    expect(await mutate(owner, upload)).toEqual(conflict);
+    const current = conflict.rows.find((r) => r.id === noteId)!;
+    expect(current.data.conflictVersions).toHaveLength(1);
+    const version = current.data.conflictVersions![0];
+    const restored = await mutate(
+      owner,
+      note({
+        baseRevision: current.revision,
+        data: {
+          title: version.title,
+          folderId: version.folderId,
+          document: version.document,
+          restoreConflictRevision: version.revision,
+          conflictVersions: [],
+        },
+      }),
+    );
+    expect(restored.rows[0].id).toBe(noteId);
+    expect(restored.rows[0].data.title).toBe("Device A");
+    expect(restored.rows[0].data.conflictVersions?.map((v) => v.title)).toEqual(
+      ["Device A", "Device B"],
+    );
+    const edited = await mutate(
+      owner,
+      note({ baseRevision: restored.rows[0].revision }),
+    );
+    expect(edited.rows[0].data.conflictVersions).toEqual(
+      restored.rows[0].data.conflictVersions,
+    );
   });
   it("preserves newer server content before accepting a stale deletion", async () => {
     await mutate(owner, note());

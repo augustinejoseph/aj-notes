@@ -60,6 +60,7 @@ export async function mutate(owner: string, m: Mutation) {
         title: m.data.title,
         document: m.data.document,
         schemaVersion: 1,
+        restoreConflictRevision: m.data.restoreConflictRevision,
         folderId: m.data.folderId,
         currentSummaryId: current?.data.currentSummaryId ?? null,
         ...(current?.data.conflictOf && m.data.conflictOf

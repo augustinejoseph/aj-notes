@@ -215,7 +215,11 @@ export async function sync(progress: (message: string) => void) {
         await api("sync", {
           method: "POST",
           headers: { "Content-Type": "application/json" },
-          body: JSON.stringify(m),
+          // History is server-owned and can be much larger than the edited document.
+          body: JSON.stringify({
+            ...m,
+            data: { ...m.data, conflictVersions: undefined },
+          }),
         })
       ).json();
       await exclusive(async () => {
@@ -243,6 +247,7 @@ export async function sync(progress: (message: string) => void) {
             const nextKey = `${target.kind}:${target.id}`;
             const data = {
               ...pending.data,
+              conflictVersions: target.data.conflictVersions,
               ...(target.id !== m.entityId ? { conflictOf: m.entityId } : {}),
               ...(m.kind === "notes"
                 ? { currentSummaryId: target.data.currentSummaryId ?? null }

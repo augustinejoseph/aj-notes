@@ -8,7 +8,7 @@ Live integration requires owner credentials and an isolated test database. Do no
 - Create folders and notes, rename/move/search them, and delete a populated folder. Verify notes move to Unfiled.
 - Exercise slash commands, drag handles, formatting, code, tables, checklists, image upload/drop, and Mermaid preview/error handling. Paste a representative article with interleaved images; inspect ordering and unavailable-image placeholders.
 - Finish automatic download, close the app, disable networking, and reopen. View every note and image, create/edit/delete notes, add images, and edit summaries. Reconnect and verify another device gets the same result.
-- Edit one note independently on two offline devices. Verify both versions survive reconnect. Repeat with summary edits and edit-versus-delete. Resolve conflict copies through comparison and explicit deletion.
+- Edit one note independently on two offline devices. Verify both versions survive reconnect under one note ID, with the displaced edit in Saved versions. Restore a version and verify the replaced content remains saved. Repeat with summary edits and edit-versus-delete. For summary and edit-versus-delete conflicts, resolve conflict copies through comparison and explicit deletion.
 - Interrupt an upload or lose a sync response. Retry and verify no duplicated images, mutations, or summary generations. Exercise two tabs and verify outbox serialization.
 - Generate an AI summary, edit it, regenerate, inspect history and saved source, and delete individual versions with confirmation. Verify outdated status after source edits. Fail AI with an invalid model or exhausted credits and verify content remains intact.
 - Expire the auth session during offline work, reconnect, sign in again, and verify queued edits survive. Explicitly sign out and verify another tab and offline reopening no longer expose cached notes.
@@ -53,3 +53,11 @@ For browser tests, install Playwright in your test tooling, start the production
 - A real public HTTPS image download passed through the DNS-pinned importer, independently of browser fixtures.
 - 30 unit/API tests passed, including image validation/compression, authenticated import boundaries, blocked network destinations, redirect revalidation, and bounded response streams. The 11 database integration tests remain skipped without an isolated test database.
 - Production build, TypeScript, and formatting checks passed. Live owner authentication, hosted database writes, and physical-device behavior were not exercised.
+
+## Conflict version preservation verified on 2026-11-13
+
+- Concurrent edits to a live note retain one note ID. The last synced edit is visible; displaced content is saved inside the note and can be reviewed and restored. Existing conflict copies and edit-versus-delete recovery behavior remain unchanged.
+- All 44 tests passed, including 12 PostgreSQL integration tests against a disposable local database. Checks include concurrent saves, idempotent retries, retained server-owned history, and restoration that preserves replaced content.
+- Production Chrome acceptance checks passed, including a simulated second-device edit, unchanged note count, saved-version restoration, and reload persistence. Existing offline, retry, in-flight typing, images, summaries, Settings, routing, responsive layout, and confirmation checks also passed.
+- Formatting, TypeScript, production build, offline asset generation, and diff whitespace checks passed. Saved history is excluded from edit uploads to avoid inflating request sizes.
+- Hosted authentication/services and physical devices were not exercised.

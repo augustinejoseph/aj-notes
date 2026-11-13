@@ -2,7 +2,7 @@
 const { chromium } = require(process.env.PLAYWRIGHT_MODULE || "playwright");
 const assert = require("node:assert/strict");
 const { randomUUID } = require("node:crypto");
-const { mutationSchema } = require("../lib/model.ts");
+const { mutationSchema, applyMutation } = require("../lib/model.ts");
 const origin = process.env.NOTES_PREVIEW_URL || "http://localhost:3003";
 (async () => {
   console.log("Launching browser");
@@ -83,13 +83,7 @@ const origin = process.env.NOTES_PREVIEW_URL || "http://localhost:3003";
           });
         let result = receipts.get(m.id);
         if (!result) {
-          const row = {
-            id: m.entityId,
-            kind: m.kind,
-            revision: (data.get(m.entityId)?.revision || 0) + 1,
-            deleted: m.deleted,
-            data: m.data,
-          };
+          const { row } = applyMutation(data.get(m.entityId), m, randomUUID);
           data.set(row.id, row);
           changes.push({ seq: changes.length + 1, payload: row });
           result = { rows: [row] };
@@ -387,14 +381,21 @@ const origin = process.env.NOTES_PREVIEW_URL || "http://localhost:3003";
         return rows.some((r) => r.kind === "notes" && r.data.title === wanted);
       }, title);
     console.log("Editing during in-flight sync");
+    holdNext = true;
+    const started = new Promise((resolve, reject) => {
+      const deadline = setTimeout(
+        () => reject(new Error("Sync upload did not start within 15 seconds")),
+        15000,
+      );
+      requestStarted = () => {
+        clearTimeout(deadline);
+        resolve();
+      };
+    });
     await page
       .getByRole("textbox", { name: "Note title", exact: true })
       .fill("First in-flight edit");
     await waitForLocalTitle("First in-flight edit");
-    holdNext = true;
-    const started = new Promise((resolve) => {
-      requestStarted = resolve;
-    });
     await page.getByRole("button", { name: "Sync", exact: true }).click();
     await started;
     await page
@@ -669,6 +670,77 @@ const origin = process.env.NOTES_PREVIEW_URL || "http://localhost:3003";
     console.log(
       "Browser checks passed: editor, mixed image paste, Mermaid offline, summary editing, offline reopen, lost-response retry, in-flight edits, settings, and mobile layout.",
     );
+    console.log("Checking cross-device conflicts and version restoration");
+    const conflictNote = data.get(new URL(page.url()).pathname.split("/")[2]);
+    assert.equal(conflictNote.kind, "notes");
+    const beforeConflictCount = [...data.values()].filter(
+      (r) => r.kind === "notes" && !r.deleted,
+    ).length;
+    const remoteEdit = applyMutation(
+      conflictNote,
+      {
+        id: randomUUID(),
+        kind: "notes",
+        entityId: conflictNote.id,
+        baseRevision: conflictNote.revision,
+        deleted: false,
+        data: { ...conflictNote.data, title: "Edit from another device" },
+      },
+      randomUUID,
+    ).row;
+    data.set(remoteEdit.id, remoteEdit);
+    changes.push({ seq: changes.length + 1, payload: remoteEdit });
+    await page
+      .getByRole("textbox", { name: "Note title", exact: true })
+      .fill("Local conflicting edit");
+    await waitForLocalTitle("Local conflicting edit");
+    await page.getByRole("button", { name: "Sync", exact: true }).click();
+    await page
+      .getByRole("status")
+      .filter({ hasText: "All notes and images available offline" })
+      .waitFor();
+    assert.equal(
+      [...data.values()].filter((r) => r.kind === "notes" && !r.deleted).length,
+      beforeConflictCount,
+    );
+    assert.equal(data.get(remoteEdit.id).data.title, "Local conflicting edit");
+    await page.getByText(/Saved versions from other devices/).click();
+    await page
+      .getByText(`Edit from another device · revision ${remoteEdit.revision}`, {
+        exact: true,
+      })
+      .click();
+    await page
+      .getByRole("button", { name: "Restore this version", exact: true })
+      .click();
+    await waitForLocalTitle("Edit from another device");
+    await page.getByRole("button", { name: "Sync", exact: true }).click();
+    await page
+      .getByRole("status")
+      .filter({ hasText: "All notes and images available offline" })
+      .waitFor();
+    assert.equal(
+      data.get(remoteEdit.id).data.title,
+      "Edit from another device",
+    );
+    assert(
+      data
+        .get(remoteEdit.id)
+        .data.conflictVersions.some(
+          (v) => v.title === "Local conflicting edit",
+        ),
+    );
+    await page.reload();
+    await page
+      .getByRole("textbox", { name: "Note title", exact: true })
+      .waitFor();
+    assert.equal(
+      await page
+        .getByRole("textbox", { name: "Note title", exact: true })
+        .inputValue(),
+      "Edit from another device",
+    );
+    console.log("Cross-device conflict identity and restoration passed");
     console.log("Checking folder names and destructive action confirmations");
     await page.setViewportSize({ width: 1440, height: 1000 });
     page.removeAllListeners("dialog");
@@ -703,7 +775,7 @@ const origin = process.env.NOTES_PREVIEW_URL || "http://localhost:3003";
       .waitFor();
     await page
       .getByRole("button", {
-        name: "Delete Newest edit during sync",
+        name: "Delete Edit from another device",
         exact: true,
       })
       .click();
@@ -716,7 +788,7 @@ const origin = process.env.NOTES_PREVIEW_URL || "http://localhost:3003";
       .waitFor();
     await page
       .getByRole("button", {
-        name: "Delete Newest edit during sync",
+        name: "Delete Edit from another device",
         exact: true,
       })
       .click();
@@ -725,7 +797,7 @@ const origin = process.env.NOTES_PREVIEW_URL || "http://localhost:3003";
       .click();
     await page
       .getByRole("button", {
-        name: "Delete Newest edit during sync",
+        name: "Delete Edit from another device",
         exact: true,
       })
       .waitFor({ state: "detached" });

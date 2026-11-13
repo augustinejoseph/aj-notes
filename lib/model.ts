@@ -21,6 +21,12 @@ export type Data = {
   model?: string;
   instructions?: string;
   conflictOf?: string;
+  conflictVersions?: {
+    title?: string;
+    folderId?: string | null;
+    document?: Block[];
+    revision: number;
+  }[];
   createdAt?: string;
   [key: string]: unknown;
 };
@@ -172,6 +178,42 @@ export function applyMutation(
   newId: () => string,
 ): { row: RecordRow; conflict: boolean } {
   const conflict = (existing?.revision || 0) !== m.baseRevision;
+  // Live notes retain their identity across devices. Keep displaced content on
+  // the note itself so a stale upload cannot silently discard another edit.
+  if (m.kind === "notes" && existing && !existing.deleted && !m.deleted) {
+    const versions = existing.data.conflictVersions || [];
+    const changed = ["title", "folderId", "document"].some(
+      (key) =>
+        JSON.stringify(existing.data[key]) !== JSON.stringify(m.data[key]),
+    );
+    return {
+      row: {
+        ...existing,
+        revision: existing.revision + 1,
+        data: {
+          ...m.data,
+          restoreConflictRevision: undefined,
+          conflictVersions:
+            (conflict ||
+              versions.some(
+                (v) => v.revision === m.data.restoreConflictRevision,
+              )) &&
+            changed
+              ? [
+                  ...versions,
+                  {
+                    title: existing.data.title,
+                    folderId: existing.data.folderId,
+                    document: existing.data.document,
+                    revision: existing.revision,
+                  },
+                ]
+              : versions,
+        },
+      },
+      conflict,
+    };
+  }
   if (conflict && m.deleted)
     return {
       row: existing ?? {

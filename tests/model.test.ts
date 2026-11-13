@@ -40,16 +40,56 @@ describe("revision and conflict preservation", () => {
     expect(r.row.revision).toBe(4);
     expect(r.row.id).toBe(id);
   });
-  it("keeps both edits by assigning a new conflict copy ID", () => {
+  it("keeps both edits under the same note ID", () => {
     const r = applyMutation(
       row,
       { ...mutation, baseRevision: 1 },
       () => copyId,
     );
     expect(r.conflict).toBe(true);
-    expect(r.row.id).toBe(copyId);
-    expect(r.row.data.conflictOf).toBe(id);
+    expect(r.row.id).toBe(id);
+    expect(r.row.data.title).toBe("Local edit");
+    expect(r.row.data.conflictVersions).toEqual([{ ...row.data, revision: 3 }]);
     expect(row.data.title).toBe("Server edit");
+  });
+  it("does not archive identical stale uploads", () => {
+    const r = applyMutation(
+      row,
+      { ...mutation, baseRevision: 1, data: row.data },
+      () => copyId,
+    );
+    expect(r.row.id).toBe(id);
+    expect(r.row.data.conflictVersions).toEqual([]);
+  });
+  it("retains history and preserves the displaced content on restore", () => {
+    const first = applyMutation(
+      row,
+      { ...mutation, baseRevision: 1 },
+      () => copyId,
+    ).row;
+    const restored = applyMutation(
+      first,
+      {
+        ...mutation,
+        baseRevision: first.revision,
+        data: { ...row.data, restoreConflictRevision: 3 },
+      },
+      () => copyId,
+    ).row;
+    expect(restored.id).toBe(id);
+    expect(restored.data.title).toBe(row.data.title);
+    expect(restored.data.conflictVersions?.map((v) => v.title)).toEqual([
+      "Server edit",
+      "Local edit",
+    ]);
+    const edited = applyMutation(
+      restored,
+      { ...mutation, baseRevision: restored.revision },
+      () => copyId,
+    ).row;
+    expect(edited.data.conflictVersions).toEqual(
+      restored.data.conflictVersions,
+    );
   });
   it("does not resurrect a deleted note after a stale offline edit", () => {
     const r = applyMutation(

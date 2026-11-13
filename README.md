@@ -50,3 +50,5 @@ Production builds also emit `public/offline-assets.json` so all browser chunks, 
 The lockfile overrides transitive UUID and KaTeX packages to patched versions while retaining the tested editor APIs.
 
 `npm test`, `npm run typecheck`, `npm run build`. See `VALIDATION.md` for device, integration, and offline acceptance checks. No Markdown import/export is included.
+
+Folder management uses custom dialogs for naming folders and notes. Expand a folder to see its notes. Drag notes from the list or an expanded folder onto another folder or Unfiled; use a note’s Add to folder button or the editor’s folder selector when preferred. Deleting a folder keeps its notes in Unfiled by default. Select “Also delete notes in this folder and their summaries” in the confirmation dialog to remove its contents too. These choices work offline and sync when reconnected.

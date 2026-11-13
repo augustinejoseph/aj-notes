@@ -98,6 +98,60 @@ export async function save(
     notify();
   });
 }
+// Apply folder removal and its local note changes in one IndexedDB transaction.
+export async function removeFolder(id: string, deleteNotes: boolean) {
+  await exclusive(async () => {
+    const db = await database();
+    const tx = db.transaction(["records", "outbox"], "readwrite");
+    const store = tx.objectStore("records");
+    const rows = (await store.getAll()) as RecordRow[];
+    const folder = rows.find(
+      (r) => r.kind === "folders" && r.id === id && !r.deleted,
+    );
+    if (!folder) throw new Error("Folder unavailable");
+    const children = rows.filter(
+      (r) => r.kind === "notes" && !r.deleted && r.data.folderId === id,
+    );
+    const childIds = new Set(children.map((r) => r.id));
+    for (const row of [folder, ...children]) {
+      const deleted = row.kind === "folders" || deleteNotes;
+      const data =
+        row.kind === "folders"
+          ? { deleteNotes }
+          : deleted
+            ? row.data
+            : { ...row.data, folderId: null };
+      const key = `${row.kind}:${row.id}`;
+      const old = (await tx.objectStore("outbox").get(key)) as
+        QueueItem | undefined;
+      await store.put({ ...row, key, data, deleted });
+      // Folder mutation handles children atomically on the server. Preserve queued
+      // note edits, but move them out first when keeping notes.
+      if (row.kind === "folders" || deleteNotes || old) {
+        await tx.objectStore("outbox").put({
+          key,
+          id: crypto.randomUUID(),
+          kind: row.kind,
+          entityId: row.id,
+          baseRevision: old?.baseRevision ?? row.revision,
+          data,
+          deleted,
+          order: old?.order ?? Date.now(),
+        });
+      }
+    }
+    if (deleteNotes)
+      for (const summary of rows.filter(
+        (r) => r.kind === "summaries" && childIds.has(String(r.data.noteId)),
+      )) {
+        const key = `summaries:${summary.id}`;
+        await store.put({ ...summary, key, deleted: true });
+        await tx.objectStore("outbox").delete(key);
+      }
+    await tx.done;
+  });
+  notify();
+}
 export async function putImage(file: Blob): Promise<string> {
   file = await prepareImage(file);
   const id = crypto.randomUUID();
@@ -181,11 +235,13 @@ export async function sync(progress: (message: string) => void) {
         await db.put("images", { ...image, uploaded: true });
       });
     }
+    // Create destination folders first, upload moves before deleting source
+    // folders, and send individual tombstones after the folder transaction.
+    const priority = (m: QueueItem) =>
+      m.kind === "folders" ? (m.deleted ? 2 : 0) : m.deleted ? 3 : 1;
     const queue = await exclusive(async () =>
       ((await db.getAll("outbox")) as QueueItem[]).sort(
-        (a, b) =>
-          Number(b.kind === "folders") - Number(a.kind === "folders") ||
-          a.order - b.order,
+        (a, b) => priority(a) - priority(b) || a.order - b.order,
       ),
     );
     for (const m of queue) {

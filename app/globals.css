@@ -175,13 +175,13 @@ a {
   align-items: center;
   gap: 1px;
 }
-.folder > button:first-child {
+.folder > .folder-name {
   flex: 1;
   text-align: left;
   min-width: 0;
   overflow-wrap: anywhere;
 }
-.folder > button:not(:first-child) {
+.folder > button:not(.folder-name) {
   padding: 4px;
   width: 26px;
 }
@@ -782,4 +782,69 @@ select:hover {
 .image-embed p {
   max-width: 280px;
   overflow-wrap: anywhere;
+}
+
+.folder-group {
+  min-width: 0;
+  border-radius: 6px;
+}
+.folder-notes {
+  margin-left: 22px;
+  border-left: 1px solid var(--line);
+  padding-left: 6px;
+}
+.folder-notes > button {
+  display: block;
+  width: 100%;
+  text-align: left;
+  overflow-wrap: anywhere;
+}
+.folder-notes > small {
+  display: block;
+  padding: 8px;
+  color: var(--muted);
+}
+.drop-target {
+  background: #dce8d1 !important;
+  outline: 2px dashed var(--green);
+  outline-offset: -2px;
+}
+[draggable="true"] {
+  cursor: grab;
+}
+.note-move {
+  align-self: flex-start;
+  flex: none;
+  padding: 7px;
+}
+.dialog-field {
+  display: grid;
+  gap: 8px;
+  margin-top: 18px;
+}
+.dialog-checkbox {
+  display: flex;
+  align-items: flex-start;
+  gap: 10px;
+  margin-top: 18px;
+}
+.dialog-checkbox input {
+  width: auto;
+  margin-top: 5px;
+  flex: none;
+}
+@media (max-width: 520px) {
+  .sidebar nav {
+    display: grid;
+    grid-template-columns: repeat(2, minmax(0, 1fr));
+    align-items: stretch;
+    overflow: visible;
+  }
+  .sidebar nav .section-label,
+  .folder-group {
+    grid-column: 1 / -1;
+  }
+  .folder {
+    white-space: normal;
+  }
 }

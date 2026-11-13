@@ -61,3 +61,13 @@ For browser tests, install Playwright in your test tooling, start the production
 - Production Chrome acceptance checks passed, including a simulated second-device edit, unchanged note count, saved-version restoration, and reload persistence. Existing offline, retry, in-flight typing, images, summaries, Settings, routing, responsive layout, and confirmation checks also passed.
 - Formatting, TypeScript, production build, offline asset generation, and diff whitespace checks passed. Saved history is excluded from edit uploads to avoid inflating request sizes.
 - Hosted authentication/services and physical devices were not exercised.
+
+## Folder management verified on 2026-11-13
+
+- New folders and notes use custom naming dialogs; folder renaming uses the same dialog. Empty names, Cancel, Escape, initial focus, and note creation in the selected folder were checked in Chrome.
+- Folder children expand/collapse. Notes can be dragged from the list into folders, between folders, and to Unfiled. Each list entry also offers Add to folder; the editor folder selector remains available.
+- Folder deletion defaults to keeping notes in Unfiled. The confirmation checkbox explicitly deletes contained notes and summaries. Local changes are atomic, survive offline reload, and sync to the server. Pending moves upload before source-folder deletions.
+- All 46 tests passed, including 14 PostgreSQL integration tests against an isolated disposable database. Folder tests verify both deletion choices, summaries, stale folder revisions, notes added by another device, unaffected notes outside the folder, change feeds, and idempotent retries.
+- Production Chrome checks passed for the new workflows, including offline folder deletion and moving a note out before deleting its source folder. Existing editing, conflict restoration, images, summaries, routing, offline, retry, Settings, and confirmation checks passed too.
+- TypeScript, formatting, production build, offline asset generation, and diff whitespace checks passed. Desktop and mobile folder screenshots were inspected; mobile folders use stacked rows to keep names and controls readable.
+- Hosted authentication/services and physical-device testing remain unverified.

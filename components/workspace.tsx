@@ -3,6 +3,8 @@ import { useEffect, useState, useRef, useCallback } from "react";
 import dynamic from "next/dynamic";
 import { usePathname } from "next/navigation";
 import { ActionIcon } from "./action-icon";
+import { InputDialog } from "./input-dialog";
+import type { ComponentProps, DragEvent } from "react";
 import { ConfirmDialog } from "./confirm-dialog";
 import { signIn, signOut } from "next-auth/react";
 import { AppLauncher } from "@ajoseph/app-launcher";
@@ -34,8 +36,68 @@ export default function Workspace() {
     title: string;
     message: string;
     label: string;
-    action: () => void | Promise<void>;
+    action: (checked: boolean) => void | Promise<void>;
+    checkboxLabel?: string;
   } | null>(null);
+  const [inputDialog, setInputDialog] = useState<Omit<
+    ComponentProps<typeof InputDialog>,
+    "close"
+  > | null>(null);
+  const [expanded, setExpanded] = useState<Set<string>>(new Set());
+  const [dropTarget, setDropTarget] = useState<string | null>(null);
+  function moveNote(row: RecordRow, folderId: string | null) {
+    const data = latest.current.get(row.id) || row.data;
+    if (data.folderId === folderId) return;
+    edit(row, { ...data, folderId });
+    if (folderId) setExpanded((old) => new Set([...old, folderId]));
+  }
+  function dragNote(e: DragEvent, id: string) {
+    e.dataTransfer.setData("application/x-aj-note", id);
+    e.dataTransfer.effectAllowed = "move";
+  }
+  function dropProps(id: string) {
+    return {
+      onDragOver: (e: DragEvent) => {
+        if (!e.dataTransfer.types.includes("application/x-aj-note")) return;
+        e.preventDefault();
+        e.dataTransfer.dropEffect = "move";
+        setDropTarget(id);
+      },
+      onDragLeave: (e: DragEvent) => {
+        if (
+          !(e.relatedTarget instanceof Node) ||
+          !e.currentTarget.contains(e.relatedTarget)
+        )
+          setDropTarget(null);
+      },
+      onDrop: (e: DragEvent) => {
+        e.preventDefault();
+        setDropTarget(null);
+        const row = notes.find(
+          (n) => n.id === e.dataTransfer.getData("application/x-aj-note"),
+        );
+        if (row) moveNote(row, id === "unfiled" ? null : id);
+      },
+    };
+  }
+  function askMove(row: RecordRow) {
+    setInputDialog({
+      title: "Add to folder",
+      label: "Folder",
+      initialValue: row.data.folderId || "",
+      options: [
+        { value: "", label: "Unfiled" },
+        ...folders.map((f) => ({
+          value: f.id,
+          label: f.data.title || "Untitled",
+        })),
+      ],
+      action: async (value) => {
+        moveNote(row, value || null);
+        await writes.current;
+      },
+    });
+  }
   function navigate(path: string) {
     window.history.pushState(null, "", path);
   }
@@ -67,6 +129,7 @@ export default function Workspace() {
   const doSync = useCallback(async () => {
     if (syncing.current) return;
     syncing.current = true;
+    setStatus("Syncing…");
     try {
       await writes.current;
       if (!shellReady.current) {
@@ -219,19 +282,29 @@ export default function Workspace() {
       setError(e instanceof Error ? e.message : String(e));
     }
   }
-  async function createNote() {
-    await run(async () => {
-      const id = crypto.randomUUID();
-      await local.save("notes", id, {
-        title: "Untitled",
-        folderId: folder === "all" || folder === "unfiled" ? null : folder,
-        document: [],
-        schemaVersion: 1,
-        currentSummaryId: null,
-      });
-      setActive(id);
-      setTab("original");
-      setHistory(null);
+  function createNote() {
+    const folderId = folder === "all" || folder === "unfiled" ? null : folder;
+    setInputDialog({
+      title: "New note",
+      label: "Note name",
+      maxLength: 500,
+      action: async (title) => {
+        await writes.current;
+        const id = crypto.randomUUID();
+        await local.save("notes", id, {
+          title,
+          folderId,
+          document: [],
+          schemaVersion: 1,
+          currentSummaryId: null,
+        });
+        await reload();
+        setStatus("Saved on this device · awaiting sync");
+        setActive(id);
+        setTab("original");
+        setHistory(null);
+        if (folderId) setExpanded((old) => new Set([...old, folderId]));
+      },
     });
   }
   async function summarize() {
@@ -359,7 +432,8 @@ export default function Workspace() {
             All notes <span>{notes.length}</span>
           </button>
           <button
-            className={folder === "unfiled" ? "selected" : ""}
+            className={`${folder === "unfiled" ? "selected" : ""} ${dropTarget === "unfiled" ? "drop-target" : ""}`}
+            {...dropProps("unfiled")}
             onClick={() => setFolder("unfiled")}
           >
             Unfiled
@@ -368,54 +442,131 @@ export default function Workspace() {
             FOLDERS{" "}
             <button
               aria-label="New folder"
-              onClick={() => {
-                const name = prompt("Folder name");
-                if (name?.trim())
-                  void run(() =>
-                    local.save("folders", crypto.randomUUID(), {
-                      title: name.trim(),
-                    }),
-                  );
-              }}
+              onClick={() =>
+                setInputDialog({
+                  title: "New folder",
+                  label: "Folder name",
+                  maxLength: 200,
+                  action: async (title) => {
+                    await writes.current;
+                    const id = crypto.randomUUID();
+                    await local.save("folders", id, { title });
+                    await reload();
+                    setStatus("Saved on this device · awaiting sync");
+                    setExpanded((old) => new Set([...old, id]));
+                  },
+                })
+              }
             >
               ＋
             </button>
           </div>
           {folders.map((f) => (
-            <div className="folder" key={f.id}>
-              <button
-                className={folder === f.id ? "selected" : ""}
-                onClick={() => setFolder(f.id)}
+            <div
+              className={`folder-group ${dropTarget === f.id ? "drop-target" : ""}`}
+              key={f.id}
+              {...dropProps(f.id)}
+            >
+              <div className="folder">
+                <button
+                  className="folder-toggle"
+                  aria-label={`${expanded.has(f.id) ? "Collapse" : "Expand"} ${f.data.title}`}
+                  aria-expanded={expanded.has(f.id)}
+                  aria-controls={`folder-${f.id}`}
+                  onClick={() =>
+                    setExpanded((old) => {
+                      const next = new Set(old);
+                      if (next.has(f.id)) next.delete(f.id);
+                      else next.add(f.id);
+                      return next;
+                    })
+                  }
+                >
+                  {expanded.has(f.id) ? "▾" : "▸"}
+                </button>
+                <button
+                  className={`folder-name ${folder === f.id ? "selected" : ""}`}
+                  onClick={() => setFolder(f.id)}
+                >
+                  ▱ {f.data.title}
+                </button>
+                <button
+                  aria-label={`Rename ${f.data.title}`}
+                  onClick={() =>
+                    setInputDialog({
+                      title: "Rename folder",
+                      label: "Folder name",
+                      initialValue: f.data.title,
+                      maxLength: 200,
+                      action: async (title) => {
+                        edit(f, { title });
+                        await writes.current;
+                      },
+                    })
+                  }
+                >
+                  ✎
+                </button>
+                <button
+                  aria-label={`Delete ${f.data.title}`}
+                  title={`Delete ${f.data.title}`}
+                  className="danger"
+                  onClick={() =>
+                    setConfirmation({
+                      title: "Delete folder?",
+                      message: `Delete “${f.data.title}”? Notes will move to Unfiled unless you choose to delete them too.`,
+                      label: "Delete",
+                      checkboxLabel:
+                        "Also delete notes in this folder and their summaries",
+                      action: async (deleteNotes) => {
+                        await writes.current;
+                        await local.removeFolder(f.id, deleteNotes);
+                        await reload();
+                        setStatus("Saved on this device · awaiting sync");
+                        if (folder === f.id) setFolder("all");
+                        if (
+                          deleteNotes &&
+                          notes.some(
+                            (n) => n.id === active && n.data.folderId === f.id,
+                          )
+                        ) {
+                          lastNote.current = null;
+                          setActive(null);
+                        }
+                      },
+                    })
+                  }
+                >
+                  <TrashIcon />
+                </button>
+              </div>
+              <div
+                id={`folder-${f.id}`}
+                className="folder-notes"
+                hidden={!expanded.has(f.id)}
               >
-                ▱ {f.data.title}
-              </button>
-              <button
-                aria-label={`Rename ${f.data.title}`}
-                onClick={() => {
-                  const name = prompt("Rename folder", f.data.title);
-                  if (name?.trim()) edit(f, { title: name.trim() });
-                }}
-              >
-                ✎
-              </button>
-              <button
-                aria-label={`Delete ${f.data.title}`}
-                title={`Delete ${f.data.title}`}
-                className="danger"
-                onClick={() => {
-                  setConfirmation({
-                    title: "Delete folder?",
-                    message: `“${f.data.title}” will be deleted. Its notes will move to Unfiled.`,
-                    label: "Delete",
-                    action: () => {
-                      edit(f, f.data, true);
-                      setFolder("all");
-                    },
-                  });
-                }}
-              >
-                <TrashIcon />
-              </button>
+                {notes
+                  .filter((n) => n.data.folderId === f.id)
+                  .map((n) => (
+                    <button
+                      key={n.id}
+                      className={active === n.id ? "selected" : ""}
+                      draggable
+                      onDragStart={(e) => dragNote(e, n.id)}
+                      onDragEnd={() => setDropTarget(null)}
+                      onClick={() => {
+                        setActive(n.id);
+                        setTab("original");
+                        setHistory(null);
+                      }}
+                    >
+                      {n.data.title || "Untitled"}
+                    </button>
+                  ))}
+                {!notes.some((n) => n.data.folderId === f.id) && (
+                  <small>No notes. Drop a note here.</small>
+                )}
+              </div>
             </div>
           ))}
         </nav>
@@ -435,6 +586,9 @@ export default function Workspace() {
             <div
               key={n.id}
               className={`note-row ${n.id === active ? "selected" : ""}`}
+              draggable
+              onDragStart={(e) => dragNote(e, n.id)}
+              onDragEnd={() => setDropTarget(null)}
             >
               <button
                 className="note-item"
@@ -449,6 +603,14 @@ export default function Workspace() {
                 {n.data.conflictOf && (
                   <small>Conflict copy · compare with original</small>
                 )}
+              </button>
+              <button
+                className="note-move"
+                aria-label={`Add ${n.data.title || "Untitled"} to folder`}
+                title="Add to folder"
+                onClick={() => askMove(n)}
+              >
+                ▱
               </button>
               <button
                 className="danger note-delete"
@@ -500,9 +662,7 @@ export default function Workspace() {
               <select
                 aria-label="Move note to folder"
                 value={note.data.folderId || ""}
-                onChange={(e) =>
-                  edit(note, { ...note.data, folderId: e.target.value || null })
-                }
+                onChange={(e) => moveNote(note, e.target.value || null)}
               >
                 <option value="">Unfiled</option>
                 {folders.map((f) => (
@@ -727,6 +887,9 @@ export default function Workspace() {
           </div>
         )}
       </main>
+      {inputDialog && (
+        <InputDialog {...inputDialog} close={() => setInputDialog(null)} />
+      )}
       {confirmation && (
         <ConfirmDialog {...confirmation} close={() => setConfirmation(null)} />
       )}

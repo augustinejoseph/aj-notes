@@ -83,8 +83,48 @@ const origin = process.env.NOTES_PREVIEW_URL || "http://localhost:3003";
           });
         let result = receipts.get(m.id);
         if (!result) {
+          if (m.kind === "folders" && m.deleted && data.has(m.entityId))
+            m.baseRevision = data.get(m.entityId).revision;
           const { row } = applyMutation(data.get(m.entityId), m, randomUUID);
           data.set(row.id, row);
+          if (m.kind === "folders" && row.deleted) {
+            for (const child of data.values()) {
+              if (
+                child.kind !== "notes" ||
+                child.deleted ||
+                child.data.folderId !== row.id
+              )
+                continue;
+              const updated = {
+                ...child,
+                revision: child.revision + 1,
+                deleted: m.data.deleteNotes === true,
+                data: m.data.deleteNotes
+                  ? {}
+                  : { ...child.data, folderId: null },
+              };
+              data.set(child.id, updated);
+              changes.push({ seq: changes.length + 1, payload: updated });
+              if (m.data.deleteNotes)
+                for (const summary of data.values()) {
+                  if (
+                    summary.kind === "summaries" &&
+                    summary.data.noteId === child.id &&
+                    !summary.deleted
+                  ) {
+                    const removed = {
+                      ...summary,
+                      revision: summary.revision + 1,
+                      deleted: true,
+                      data: { noteId: child.id },
+                    };
+                    data.set(summary.id, removed);
+                    changes.push({ seq: changes.length + 1, payload: removed });
+                  }
+                }
+            }
+          }
+
           changes.push({ seq: changes.length + 1, payload: row });
           result = { rows: [row] };
           receipts.set(m.id, result);
@@ -194,6 +234,11 @@ const origin = process.env.NOTES_PREVIEW_URL || "http://localhost:3003";
     await page
       .getByRole("button", { name: "＋ New note", exact: true })
       .click();
+    const naming = page.getByRole("dialog");
+    await naming
+      .getByLabel("Note name", { exact: true })
+      .fill("Browser acceptance note");
+    await naming.getByRole("button", { name: "Save", exact: true }).click();
     await page.waitForURL(/\/notes\/[a-f0-9-]+$/);
     const notePath = new URL(page.url()).pathname;
     await page
@@ -744,17 +789,233 @@ const origin = process.env.NOTES_PREVIEW_URL || "http://localhost:3003";
     console.log("Checking folder names and destructive action confirmations");
     await page.setViewportSize({ width: 1440, height: 1000 });
     page.removeAllListeners("dialog");
-    page.once("dialog", async (dialog) => {
-      assert.equal(dialog.type(), "prompt");
-      await dialog.accept("Named folder");
+    page.on("dialog", async (dialog) => {
+      errors.push(`Unexpected native dialog: ${dialog.type()}`);
+      await dialog.dismiss();
     });
+    const popup = page.getByRole("dialog");
+    const savePopup = async () => {
+      await popup.getByRole("button", { name: "Save", exact: true }).click();
+      await popup.waitFor({ state: "detached" });
+    };
+    const newFolder = async (name) => {
+      await page
+        .getByRole("button", { name: "New folder", exact: true })
+        .click();
+      await popup.getByLabel("Folder name", { exact: true }).fill(name);
+      await savePopup();
+    };
     await page.getByRole("button", { name: "New folder", exact: true }).click();
+    assert.equal(
+      await popup
+        .getByLabel("Folder name")
+        .evaluate((el) => el === document.activeElement),
+      true,
+    );
+    await popup.getByLabel("Folder name").fill("   ");
+    assert.equal(
+      await popup
+        .getByRole("button", { name: "Save", exact: true })
+        .isDisabled(),
+      true,
+    );
+    await page.keyboard.press("Escape");
+    await newFolder("Named folder");
+    await newFolder("Second folder");
     await page
-      .getByRole("button", { name: "▱ Named folder", exact: true })
+      .getByRole("button", { name: "Rename Second folder", exact: true })
+      .click();
+    await popup.getByLabel("Folder name").fill("Archive");
+    await savePopup();
+    assert.equal(await page.locator(".folder").count(), 2);
+    await page.screenshot({
+      path: "/tmp/aj-notes-folders-desktop.png",
+      fullPage: true,
+    });
+    await page.setViewportSize({ width: 390, height: 844 });
+    assert.equal(
+      await page.evaluate(
+        () => document.documentElement.scrollWidth > innerWidth,
+      ),
+      false,
+    );
+    await page.screenshot({
+      path: "/tmp/aj-notes-folders-mobile.png",
+      fullPage: true,
+    });
+    await page.setViewportSize({ width: 1440, height: 1000 });
+
+    await page
+      .getByRole("button", { name: "＋ New note", exact: true })
+      .click();
+    await popup.getByRole("button", { name: "Cancel", exact: true }).click();
+    assert.equal(new URL(page.url()).pathname.split("/")[2], remoteEdit.id);
+    const group = (name) =>
+      page.locator(".folder-group").filter({
+        has: page.getByRole("button", { name: `▱ ${name}`, exact: true }),
+      });
+    await page
+      .getByRole("button", {
+        name: "Add Edit from another device to folder",
+        exact: true,
+      })
+      .click();
+    // Folder creation can still be pending locally, so select by its visible name.
+    await popup
+      .getByLabel("Folder", { exact: true })
+      .selectOption({ label: "Named folder" });
+    await savePopup();
+    await group("Named folder")
+      .getByRole("button", { name: "Edit from another device", exact: true })
       .waitFor();
-    page.once("dialog", (dialog) => dialog.dismiss());
-    await page.getByRole("button", { name: "New folder", exact: true }).click();
-    assert.equal(await page.locator(".folder").count(), 1);
+    await page
+      .getByRole("button", { name: "Collapse Named folder", exact: true })
+      .click();
+    assert.equal(
+      await group("Named folder")
+        .getByRole("button", { name: "Edit from another device", exact: true })
+        .isVisible(),
+      false,
+    );
+    await page
+      .getByRole("button", { name: "Expand Named folder", exact: true })
+      .click();
+    await group("Named folder")
+      .getByRole("button", { name: "Edit from another device", exact: true })
+      .dragTo(group("Archive"));
+    await group("Archive")
+      .getByRole("button", { name: "Edit from another device", exact: true })
+      .waitFor();
+    await group("Archive")
+      .getByRole("button", { name: "Edit from another device", exact: true })
+      .dragTo(page.getByRole("button", { name: "Unfiled", exact: true }));
+    assert.equal(await page.getByLabel("Move note to folder").inputValue(), "");
+    const namedValue = await page
+      .getByLabel("Move note to folder")
+      .locator("option")
+      .filter({ hasText: /^Named folder$/ })
+      .getAttribute("value");
+    await page
+      .locator(".note-row")
+      .filter({
+        has: page.getByRole("button", {
+          name: "Delete Edit from another device",
+          exact: true,
+        }),
+      })
+      .dragTo(group("Named folder"));
+    await page.waitForFunction(
+      (id) =>
+        document.querySelector('[aria-label="Move note to folder"]').value ===
+        id,
+      namedValue,
+    );
+    await page.getByRole("button", { name: "Sync", exact: true }).click();
+    await page
+      .getByRole("status")
+      .filter({ hasText: "All notes and images available offline" })
+      .waitFor();
+    await page
+      .getByRole("button", { name: "Delete Named folder", exact: true })
+      .click();
+    const removeNotes = popup.getByRole("checkbox");
+    assert.equal(await removeNotes.isChecked(), false);
+    await popup.getByRole("button", { name: "Cancel", exact: true }).click();
+    await page
+      .getByRole("button", { name: "Delete Named folder", exact: true })
+      .click();
+    await popup.getByRole("button", { name: "Delete", exact: true }).click();
+    await popup.waitFor({ state: "detached" });
+    assert.equal(await page.getByLabel("Move note to folder").inputValue(), "");
+    await page.getByRole("button", { name: "Sync", exact: true }).click();
+    await page
+      .getByRole("status")
+      .filter({ hasText: "All notes and images available offline" })
+      .waitFor();
+    assert.equal(data.get(remoteEdit.id).deleted, false);
+    assert.equal(data.get(remoteEdit.id).data.folderId, null);
+    // Pending moves out must arrive before destructive source-folder removal.
+    await newFolder("Source");
+    await page
+      .getByLabel("Move note to folder")
+      .selectOption({ label: "Source" });
+    await page.getByRole("button", { name: "Sync", exact: true }).click();
+    await page
+      .getByRole("status")
+      .filter({ hasText: "All notes and images available offline" })
+      .waitFor();
+    await context.setOffline(true);
+    await page
+      .getByLabel("Move note to folder")
+      .selectOption({ label: "Unfiled" });
+    await page
+      .getByRole("button", { name: "Delete Source", exact: true })
+      .click();
+    await popup.getByRole("checkbox").check();
+    await popup.getByRole("button", { name: "Delete", exact: true }).click();
+    await popup.waitFor({ state: "detached" });
+    await context.setOffline(false);
+    await page.getByRole("button", { name: "Sync", exact: true }).click();
+    await page
+      .getByRole("status")
+      .filter({ hasText: "All notes and images available offline" })
+      .waitFor();
+    assert.equal(data.get(remoteEdit.id).deleted, false);
+    assert.equal(data.get(remoteEdit.id).data.folderId, null);
+    assert.equal(
+      [...data.values()].filter((r) => r.kind === "notes" && !r.deleted).length,
+      beforeConflictCount,
+    );
+    await page.getByRole("button", { name: "▱ Archive", exact: true }).click();
+    await page
+      .getByRole("button", { name: "＋ New note", exact: true })
+      .click();
+    await popup.getByLabel("Note name").fill("Remove with folder");
+    await savePopup();
+    const disposableId = new URL(page.url()).pathname.split("/")[2];
+    await page.getByRole("button", { name: "Sync", exact: true }).click();
+    await page
+      .getByRole("status")
+      .filter({ hasText: "All notes and images available offline" })
+      .waitFor();
+    await context.setOffline(true);
+    await page
+      .getByRole("button", { name: "Delete Archive", exact: true })
+      .click();
+    await popup.getByRole("checkbox").check();
+    await popup.getByRole("button", { name: "Delete", exact: true }).click();
+    await popup.waitFor({ state: "detached" });
+    assert.equal(
+      await page
+        .getByRole("button", { name: "Delete Remove with folder", exact: true })
+        .count(),
+      0,
+    );
+    await page.reload();
+    await page
+      .getByRole("button", { name: "＋ New note", exact: true })
+      .waitFor();
+    assert.equal(
+      await page
+        .getByRole("button", { name: "Delete Remove with folder", exact: true })
+        .count(),
+      0,
+    );
+    await context.setOffline(false);
+    await page.getByRole("button", { name: "Sync", exact: true }).click();
+    await page
+      .getByRole("status")
+      .filter({ hasText: "All notes and images available offline" })
+      .waitFor();
+    assert.equal(data.get(disposableId).deleted, true);
+    await page
+      .locator(".note-list .note-item")
+      .filter({ hasText: "Edit from another device" })
+      .click();
+    assert.deepEqual(errors, []);
+    console.log(
+      "Custom naming, folder expansion, drag and drop, add-to-folder, and both folder deletion choices passed",
+    );
     await page.getByRole("button", { name: "Sign out", exact: true }).click();
     const confirmation = page.getByRole("dialog");
     await confirmation

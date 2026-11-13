@@ -202,6 +202,78 @@ describe.skipIf(!url)("PostgreSQL sync and summary integration", () => {
     ).toBeNull();
     expect(result.rows).toHaveLength(1);
   });
+  it.each([false, true])(
+    "deletes a folder atomically with deleteNotes=%s",
+    async (deleteNotes) => {
+      const folderId = randomUUID();
+      await mutate(owner, {
+        id: randomUUID(),
+        kind: "folders",
+        entityId: folderId,
+        baseRevision: 0,
+        deleted: false,
+        data: { title: "Folder" },
+      });
+      await mutate(
+        owner,
+        note({ data: { title: "Inside", folderId, document: [] } }),
+      );
+      const summaryId = randomUUID();
+      await sql()`INSERT INTO summaries(id,owner,revision,deleted,data) VALUES (${summaryId},${owner},1,false,${sql().json({ noteId, document: [] })})`;
+      // A second device renames the folder and creates another note before deletion arrives.
+      await mutate(owner, {
+        id: randomUUID(),
+        kind: "folders",
+        entityId: folderId,
+        baseRevision: 1,
+        deleted: false,
+        data: { title: "Renamed" },
+      });
+      const remoteId = randomUUID();
+      await mutate(
+        owner,
+        note({
+          entityId: remoteId,
+          data: { title: "Other device", folderId, document: [] },
+        }),
+      );
+      const outsideId = randomUUID();
+      await mutate(owner, note({ entityId: outsideId }));
+      const deletion: Mutation = {
+        id: randomUUID(),
+        kind: "folders",
+        entityId: folderId,
+        baseRevision: 1,
+        deleted: true,
+        data: { deleteNotes },
+      };
+      const result = await mutate(owner, deletion);
+      expect(await mutate(owner, deletion)).toEqual(result);
+      const [folder] = await sql()`SELECT * FROM folders WHERE id=${folderId}`;
+      expect(folder.deleted).toBe(true);
+      const inside =
+        await sql()`SELECT * FROM notes WHERE id IN (${noteId},${remoteId})`;
+      expect(inside).toHaveLength(2);
+      for (const child of inside) {
+        expect(child.deleted).toBe(deleteNotes);
+        if (!deleteNotes) expect(child.data.folderId).toBe(null);
+      }
+      const [outside] = await sql()`SELECT * FROM notes WHERE id=${outsideId}`;
+      expect(outside.deleted).toBe(false);
+      const [summary] =
+        await sql()`SELECT * FROM summaries WHERE id=${summaryId}`;
+      expect(summary.deleted).toBe(deleteNotes);
+      const changes = await pullChanges(owner, 0);
+      expect(
+        changes.changes.some(
+          (c) =>
+            c.payload.id === noteId &&
+            c.payload.deleted === deleteNotes &&
+            (deleteNotes || c.payload.data.folderId === null),
+        ),
+      ).toBe(true);
+    },
+  );
   it("prevents one owner from overwriting another owner’s UUID", async () => {
     await mutate(owner, note());
     const stranger = randomUUID();

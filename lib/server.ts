@@ -119,6 +119,10 @@ export async function mutate(owner: string, m: Mutation) {
         document: m.data.document,
       };
     }
+    // Folder deletion is explicit and applies to its current membership under
+    // the owner lock, including notes created by another device before sync.
+    if (m.kind === "folders" && m.deleted && current)
+      m.baseRevision = current.revision;
     const result = applyMutation(current, m, randomUUID);
     const rows: RecordRow[] = [];
     if (
@@ -166,6 +170,21 @@ export async function mutate(owner: string, m: Mutation) {
       rows.push(recoveredNote);
     }
     if (result.row.deleted && m.kind === "folders") {
+      if (m.data.deleteNotes === true) {
+        const children =
+          await tx`SELECT * FROM notes WHERE owner=${owner} AND deleted=false AND data->>'folderId'=${m.entityId}`;
+        for (const child of children) {
+          const row: RecordRow = {
+            ...shape("notes", child),
+            revision: child.revision + 1,
+            deleted: true,
+            data: {},
+          };
+          await write(tx, owner, row);
+          rows.push(row);
+          await tx`WITH removed AS (UPDATE summaries SET data=jsonb_build_object('noteId',${child.id}::text),deleted=true,revision=revision+1 WHERE owner=${owner} AND deleted=false AND data->>'noteId'=${child.id} RETURNING *) INSERT INTO changes(owner,payload) SELECT owner,jsonb_build_object('kind','summaries','id',id,'revision',revision,'deleted',deleted,'data',data) FROM removed`;
+        }
+      }
       await tx`WITH moved AS (UPDATE notes SET data=jsonb_set(data,'{folderId}','null'::jsonb),revision=revision+1 WHERE owner=${owner} AND deleted=false AND data->>'folderId'=${m.entityId} RETURNING *) INSERT INTO changes(owner,payload) SELECT owner,jsonb_build_object('kind','notes','id',id,'revision',revision,'deleted',deleted,'data',data) FROM moved`;
     }
     if (result.row.deleted && m.kind === "notes") {
